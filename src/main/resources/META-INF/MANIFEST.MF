@@ -1,0 +1,4 @@
+Manifest-Version: 1.0
+Implementation-Title: syslenz-java
+Implementation-Version: 1.0.0
+Implementation-Vendor: syslenz
