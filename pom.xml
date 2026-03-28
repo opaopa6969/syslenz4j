@@ -7,59 +7,92 @@
 
     <groupId>org.unlaxer.infra</groupId>
     <artifactId>syslenz4j</artifactId>
-    <version>1.0.0</version>
+    <version>${revision}</version>
     <packaging>jar</packaging>
 
     <name>syslenz4j</name>
-    <description>
-        Java library for exporting JVM and application metrics to syslenz.
-        Runs inside the JVM and serves metrics via TCP (syslenz --connect)
-        or prints a snapshot to stdout (plugin mode).
-    </description>
+    <description>Java library for exporting JVM and application metrics to syslenz. Zero dependencies, MXBeans-based, TCP server compatible with syslenz --connect.</description>
     <url>https://github.com/opaopa6969/syslenz4j</url>
+
+    <scm>
+        <connection>scm:git:git@github.com:opaopa6969/syslenz4j.git</connection>
+        <developerConnection>scm:git:git@github.com:opaopa6969/syslenz4j.git</developerConnection>
+        <url>https://github.com/opaopa6969/syslenz4j</url>
+    </scm>
 
     <licenses>
         <license>
-            <name>MIT License</name>
+            <name>MIT</name>
             <url>https://opensource.org/licenses/MIT</url>
         </license>
     </licenses>
 
     <developers>
         <developer>
+            <name>opaopa6969</name>
+            <email>opaopa6969@gmail.com</email>
             <id>opaopa6969</id>
-            <url>https://github.com/opaopa6969</url>
+            <timezone>-9</timezone>
         </developer>
     </developers>
 
-    <scm>
-        <connection>scm:git:git://github.com/opaopa6969/syslenz4j.git</connection>
-        <developerConnection>scm:git:ssh://github.com:opaopa6969/syslenz4j.git</developerConnection>
-        <url>https://github.com/opaopa6969/syslenz4j</url>
-    </scm>
-
     <properties>
+        <revision>1.0.0</revision>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <maven.compiler.source>11</maven.compiler.source>
         <maven.compiler.target>11</maven.compiler.target>
-        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
 
     <distributionManagement>
-        <!-- GitHub Packages -->
-        <repository>
-            <id>github</id>
-            <name>GitHub Packages</name>
-            <url>https://maven.pkg.github.com/opaopa6969/syslenz4j</url>
-        </repository>
-        <!-- Maven Central (via OSSRH) -->
         <snapshotRepository>
             <id>ossrh</id>
-            <url>https://s01.oss.sonatype.org/content/repositories/snapshots</url>
+            <url>https://oss.sonatype.org/content/repositories/snapshots</url>
         </snapshotRepository>
+        <repository>
+            <id>ossrh</id>
+            <url>https://oss.sonatype.org/service/local/staging/deploy/maven2/</url>
+        </repository>
     </distributionManagement>
+
+    <!-- No external dependencies - uses only JDK MXBeans and standard library -->
 
     <build>
         <plugins>
+            <!-- CI Friendly Versions -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>flatten-maven-plugin</artifactId>
+                <version>1.6.0</version>
+                <configuration>
+                    <updatePomFile>true</updatePomFile>
+                    <flattenMode>resolveCiFriendliesOnly</flattenMode>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>flatten</id>
+                        <phase>process-resources</phase>
+                        <goals><goal>flatten</goal></goals>
+                    </execution>
+                    <execution>
+                        <id>flatten.clean</id>
+                        <phase>clean</phase>
+                        <goals><goal>clean</goal></goals>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- Maven Central publish -->
+            <plugin>
+                <groupId>org.sonatype.central</groupId>
+                <artifactId>central-publishing-maven-plugin</artifactId>
+                <version>0.9.0</version>
+                <extensions>true</extensions>
+                <configuration>
+                    <publishingServerId>central</publishingServerId>
+                    <autoPublish>true</autoPublish>
+                </configuration>
+            </plugin>
+
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
@@ -69,20 +102,11 @@
                     <target>11</target>
                 </configuration>
             </plugin>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-jar-plugin</artifactId>
-                <version>3.3.0</version>
-                <configuration>
-                    <archive>
-                        <manifestFile>src/main/resources/META-INF/MANIFEST.MF</manifestFile>
-                    </archive>
-                </configuration>
-            </plugin>
+
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-source-plugin</artifactId>
-                <version>3.3.0</version>
+                <version>2.2.1</version>
                 <executions>
                     <execution>
                         <id>attach-sources</id>
@@ -90,6 +114,7 @@
                     </execution>
                 </executions>
             </plugin>
+
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-javadoc-plugin</artifactId>
@@ -101,40 +126,25 @@
                     </execution>
                 </executions>
             </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-gpg-plugin</artifactId>
+                <version>3.0.1</version>
+                <executions>
+                    <execution>
+                        <id>sign-artifacts</id>
+                        <phase>verify</phase>
+                        <goals><goal>sign</goal></goals>
+                        <configuration>
+                            <gpgArguments>
+                                <arg>--pinentry-mode</arg>
+                                <arg>loopback</arg>
+                            </gpgArguments>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
         </plugins>
     </build>
-
-    <profiles>
-        <!-- Maven Central publish profile (activate with -Prelease) -->
-        <profile>
-            <id>release</id>
-            <build>
-                <plugins>
-                    <plugin>
-                        <groupId>org.apache.maven.plugins</groupId>
-                        <artifactId>maven-gpg-plugin</artifactId>
-                        <version>3.1.0</version>
-                        <executions>
-                            <execution>
-                                <id>sign-artifacts</id>
-                                <phase>verify</phase>
-                                <goals><goal>sign</goal></goals>
-                            </execution>
-                        </executions>
-                    </plugin>
-                    <plugin>
-                        <groupId>org.sonatype.plugins</groupId>
-                        <artifactId>nexus-staging-maven-plugin</artifactId>
-                        <version>1.6.13</version>
-                        <extensions>true</extensions>
-                        <configuration>
-                            <serverId>ossrh</serverId>
-                            <nexusUrl>https://s01.oss.sonatype.org/</nexusUrl>
-                            <autoReleaseAfterClose>true</autoReleaseAfterClose>
-                        </configuration>
-                    </plugin>
-                </plugins>
-            </build>
-        </profile>
-    </profiles>
 </project>
