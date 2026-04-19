@@ -214,5 +214,5 @@ The TCP server uses a simple text protocol:
 
 ## Requirements
 
-- Java 11 or later
+- Java 17 or later
 - No external dependencies
