@@ -1,11 +1,15 @@
 package org.unlaxer.infra.syslenz4j;
 
 import java.io.*;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketException;
 import java.net.SocketTimeoutException;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Lightweight TCP server compatible with the {@code syslenz --connect} protocol.
@@ -29,14 +33,22 @@ public class SyslenzServer {
     private static final int SO_TIMEOUT_MS = 30_000;
 
     private final int port;
+    private final String bindAddress;
     private final MetricRegistry registry;
+    private final WatchRegistry watchRegistry;
     private volatile ServerSocket serverSocket;
     private volatile Thread serverThread;
     private volatile boolean running;
 
     SyslenzServer(int port, MetricRegistry registry) {
+        this(port, "0.0.0.0", registry, null);
+    }
+
+    SyslenzServer(int port, String bindAddress, MetricRegistry registry, WatchRegistry watchRegistry) {
         this.port = port;
+        this.bindAddress = bindAddress != null ? bindAddress : "0.0.0.0";
         this.registry = registry;
+        this.watchRegistry = watchRegistry;
     }
 
     /**
@@ -70,7 +82,8 @@ public class SyslenzServer {
 
     private void acceptLoop() {
         try {
-            serverSocket = new ServerSocket(port);
+            serverSocket = new ServerSocket();
+            serverSocket.bind(new InetSocketAddress(InetAddress.getByName(bindAddress), port));
             serverSocket.setSoTimeout(1000); // allow periodic running check
 
             while (running) {
@@ -122,6 +135,26 @@ public class SyslenzServer {
         JvmCollector collector = new JvmCollector();
         List<JvmCollector.Metric> jvmMetrics = collector.collect();
         List<JvmCollector.Metric> customMetrics = registry.collect();
+
+        // Drive WatchRegistry evaluation on each snapshot
+        if (watchRegistry != null) {
+            Map<String, Double> metricValues = new HashMap<>();
+            for (JvmCollector.Metric m : jvmMetrics) {
+                if (m.value instanceof Number) {
+                    metricValues.put(m.name, ((Number) m.value).doubleValue());
+                }
+            }
+            for (JvmCollector.Metric m : customMetrics) {
+                if (m.value instanceof Number) {
+                    // strip "app_" prefix added by MetricRegistry.collect()
+                    String key = m.name.startsWith("app_") ? m.name.substring(4) : m.name;
+                    metricValues.put(m.name, ((Number) m.value).doubleValue());
+                    metricValues.put(key, ((Number) m.value).doubleValue());
+                }
+            }
+            watchRegistry.evaluate(metricValues);
+        }
+
         // Ensure single-line JSON (no embedded newlines)
         String json = JsonExporter.export(jvmMetrics, customMetrics);
         return json.replace("\n", "").replace("\r", "");

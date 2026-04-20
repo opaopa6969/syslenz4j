@@ -104,9 +104,9 @@ public class WatchCondition {
 
     // ── 複合条件 ──
 
-    public WatchCondition and(String otherMetric) {
-        this.compound = new CompoundCondition(otherMetric);
-        return this;
+    public CompoundCondition and(String otherMetric) {
+        this.compound = new CompoundCondition(otherMetric, this);
+        return this.compound;
     }
 
     // ── 設定 ──
@@ -165,18 +165,37 @@ public class WatchCondition {
 
     static class CompoundCondition {
         final String metricName;
+        private final WatchCondition parent;
         Operator operator;
         double threshold;
 
-        CompoundCondition(String metricName) {
+        CompoundCondition(String metricName, WatchCondition parent) {
             this.metricName = metricName;
+            this.parent = parent;
         }
 
         public WatchCondition greaterThan(double value) {
-            // This is handled via the parent — simplified for MVP
             this.operator = Operator.GREATER_THAN;
             this.threshold = value;
-            return null; // chain breaks here for compound, handled in evaluate
+            return parent;
+        }
+
+        public WatchCondition lessThan(double value) {
+            this.operator = Operator.LESS_THAN;
+            this.threshold = value;
+            return parent;
+        }
+
+        public WatchCondition greaterThanOrEqual(double value) {
+            this.operator = Operator.GREATER_THAN_OR_EQUAL;
+            this.threshold = value;
+            return parent;
+        }
+
+        public WatchCondition lessThanOrEqual(double value) {
+            this.operator = Operator.LESS_THAN_OR_EQUAL;
+            this.threshold = value;
+            return parent;
         }
 
         boolean evaluate(double value) {

@@ -43,14 +43,34 @@ public final class SyslenzAgent {
      * <p>デーモンスレッドで動作し、JVM のシャットダウンを妨げない。
      * {@code SNAPSHOT\n} コマンドに ProcEntry JSON で応答する。
      * 複数回呼んでも安全（既に起動中なら無視）。
+     * バインドアドレスは {@code 0.0.0.0}（全インタフェース）。
      *
      * @param port TCP ポート（例: 9100）
      */
     public static void startServer(int port) {
+        startServer(port, "0.0.0.0");
+    }
+
+    /**
+     * TCP サーバーを指定バインドアドレスで起動する。
+     *
+     * <p>デーモンスレッドで動作し、JVM のシャットダウンを妨げない。
+     * {@code SNAPSHOT\n} コマンドに ProcEntry JSON で応答する。
+     * 複数回呼んでも安全（既に起動中なら無視）。
+     *
+     * <pre>{@code
+     * // ループバックのみにバインドする例
+     * SyslenzAgent.startServer(9100, "127.0.0.1");
+     * }</pre>
+     *
+     * @param port        TCP ポート（例: 9100）
+     * @param bindAddress バインドアドレス（例: {@code "127.0.0.1"} または {@code "0.0.0.0"}）
+     */
+    public static void startServer(int port, String bindAddress) {
         if (serverInstance != null) return;
         synchronized (SyslenzAgent.class) {
             if (serverInstance != null) return;
-            SyslenzServer server = new SyslenzServer(port, REGISTRY);
+            SyslenzServer server = new SyslenzServer(port, bindAddress, REGISTRY, WATCHES);
             server.start();
             serverInstance = server;
         }
