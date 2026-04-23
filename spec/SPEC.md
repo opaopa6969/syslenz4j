@@ -22,6 +22,7 @@
 10. [非機能要件 (Non-Functional Requirements)](#10-非機能要件-non-functional-requirements)
 11. [テスト戦略 (Test Strategy)](#11-テスト戦略-test-strategy)
 12. [デプロイ / 運用 (Deployment and Operations)](#12-デプロイ--運用-deployment-and-operations)
+- [Appendix G. Mermaid ダイアグラム (Diagrams)](#appendix-g-mermaid-ダイアグラム-diagrams)
 
 ---
 
@@ -1686,5 +1687,201 @@ Watch API の主要コンポーネントが追加された:
 - **外部依存の追加** — ゼロ依存ポリシーは不変
 
 ---
+
+## Appendix G. Mermaid ダイアグラム (Diagrams)
+
+### G.1 クラス図 (Class Diagram)
+
+主要クラスの関係を示す。
+
+```mermaid
+classDiagram
+    class SyslenzAgent {
+        -static SyslenzServer serverInstance
+        -static MetricRegistry metricRegistry
+        -static WatchRegistry watchRegistry
+        +startServer(port) void
+        +startServer(port, bindAddress) void
+        +stopServer() void
+        +printSnapshot() void
+        +registry() MetricRegistry
+        +watch(metricName) WatchCondition
+        +clearWatches() void
+    }
+
+    class MetricRegistry {
+        -ConcurrentHashMap registrations
+        +gauge(name, supplier) void
+        +gauge(name, supplier, desc) void
+        +counter(name, supplier) void
+        +counter(name, supplier, desc) void
+        +text(name, supplier) void
+        +text(name, supplier, desc) void
+        +remove(name) void
+        +collect() List~Metric~
+    }
+
+    class WatchRegistry {
+        -CopyOnWriteArrayList~WatchEntry~ entries
+        +register(condition) void
+        +evaluate(metricValues) void
+        +clearWatches() void
+    }
+
+    class WatchEntry {
+        +WatchCondition condition
+        +boolean wasFiring
+        +long lastFiredAt
+    }
+
+    class WatchCondition {
+        -String metricName
+        -Operator operator
+        -double threshold
+        -double rangeMin
+        -double rangeMax
+        -Severity severity
+        -long cooldownMs
+        -Consumer~WatchEvent~ onFire
+        -Consumer~WatchEvent~ onResolve
+        -CompoundCondition compound
+        +greaterThan(v) WatchCondition
+        +lessThan(v) WatchCondition
+        +greaterThanOrEqual(v) WatchCondition
+        +lessThanOrEqual(v) WatchCondition
+        +equalTo(v) WatchCondition
+        +notEqualTo(v) WatchCondition
+        +outsideRange(min, max) WatchCondition
+        +insideRange(min, max) WatchCondition
+        +and(metricName) CompoundCondition
+        +severity(Severity) WatchCondition
+        +cooldown(ms) WatchCondition
+        +onFire(Consumer) WatchCondition
+        +onResolve(Consumer) WatchCondition
+        +register() void
+        +evaluate(value) boolean
+    }
+
+    class SyslenzServer {
+        -int port
+        -String bindAddress
+        -volatile boolean running
+        -MetricRegistry metricRegistry
+        -WatchRegistry watchRegistry
+        +start() void
+        +stop() void
+        -acceptLoop() void
+        -collectSnapshot() String
+        -handleClient(socket) void
+    }
+
+    SyslenzAgent --> MetricRegistry : holds
+    SyslenzAgent --> WatchRegistry : holds
+    SyslenzAgent --> SyslenzServer : creates
+    SyslenzServer --> MetricRegistry : uses
+    SyslenzServer --> WatchRegistry : uses
+    WatchRegistry --> WatchEntry : manages
+    WatchEntry --> WatchCondition : wraps
+    WatchCondition --> WatchCondition : compound (inner)
+```
+
+### G.2 状態図 (State Diagram) — WatchEntry
+
+`WatchEntry` の NOT_FIRING / FIRING 状態遷移とクールダウンを示す。
+
+```mermaid
+stateDiagram-v2
+    [*] --> NOT_FIRING : register()
+
+    NOT_FIRING --> FIRING : condition == true\nAND compound == true\nAND (now - lastFiredAt) >= cooldownMs\n→ wasFiring=true, lastFiredAt=now\n→ onFire callback
+
+    FIRING --> NOT_FIRING : condition == false\nOR compound == false\n→ wasFiring=false\n→ onResolve callback
+
+    NOT_FIRING --> NOT_FIRING : condition == true\nBUT cooldown not elapsed\n(suppressed)
+
+    FIRING --> FIRING : condition still true\n(no re-fire)
+
+    note right of NOT_FIRING
+        wasFiring = false
+        lastFiredAt = 0 (初期値)
+        cooldown デフォルト 10,000 ms
+    end note
+
+    note right of FIRING
+        wasFiring = true
+        lastFiredAt = System.currentTimeMillis()
+        解除にはクールダウンなし
+    end note
+```
+
+### G.3 シーケンス図 (Sequence Diagram) — TCP SNAPSHOT プロトコル
+
+`syslenz --connect` が TCP で `SNAPSHOT` を送受信するフローを示す。
+
+```mermaid
+sequenceDiagram
+    participant App as Java Application
+    participant Agent as SyslenzAgent
+    participant Server as SyslenzServer
+    participant Client as syslenz --connect
+
+    App->>Agent: startServer(port)
+    Agent->>Server: new SyslenzServer(port, bindAddress)
+    Agent->>Server: start()
+    Server-->>Server: ServerSocket.bind(port)\ndaemon thread "syslenz-server-<port>"
+
+    loop accept loop (SO_TIMEOUT=1000ms)
+        Server-->>Server: accept() → wait for connection
+    end
+
+    Client->>Server: TCP connect
+    Server-->>Server: accept() returns socket
+
+    Client->>Server: "SNAPSHOT\n"
+    Server-->>Server: collectSnapshot()\n  JvmCollector.collect()\n  MetricRegistry.collect()\n  WatchRegistry.evaluate(metricValues)\n  JsonExporter.export()\n  strip newlines
+
+    Server->>Client: JSON (1 line) + "\n"
+
+    Note over Client,Server: 接続継続 or close
+
+    Client->>Server: "SNAPSHOT\n"
+    Server->>Client: JSON (1 line) + "\n"
+
+    Client->>Server: TCP close
+
+    App->>Agent: stopServer()
+    Agent->>Server: stop()
+    Server-->>Server: running=false\nServerSocket.close()\nSocketException → loop exit
+```
+
+### G.4 フローチャート (Flowchart) — 閾値評価ロジック
+
+`WatchRegistry.evaluate()` における閾値評価と状態遷移の決定フローを示す。
+
+```mermaid
+flowchart TD
+    A([evaluate called\nmetricValues map]) --> B{entry in entries}
+    B -- 次のエントリ --> C{metricValues に\nmetricName あり?}
+    C -- No --> B
+    C -- Yes --> D[value = metricValues.get\nmetricName]
+    D --> E{primaryCondition\nevaluate値 == true?}
+    E -- No --> N{wasFiring\n== true?}
+    E -- Yes --> F{compound\n!= null?}
+    F -- No --> H
+    F -- Yes --> G{secondary metric\nあり?}
+    G -- No --> N
+    G -- Yes --> I{compound\nevaluate値 == true?}
+    I -- No --> N
+    I -- Yes --> H{wasFiring\n== false?}
+    H -- No\nalready firing --> B
+    H -- Yes --> J{cooldown\n経過?}
+    J -- No --> B
+    J -- Yes --> K[wasFiring = true\nlastFiredAt = now\nonFire callback]
+    K --> B
+    N -- No\nnot firing --> B
+    N -- Yes --> M[wasFiring = false\nonResolve callback]
+    M --> B
+    B -- 全エントリ完了 --> Z([done])
+```
 
 *このドキュメントは syslenz4j v1.1.1 の実装に基づいて作成された。*
