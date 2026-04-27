@@ -368,13 +368,12 @@ syslenz `--connect` プロトコルに準拠するシンプルなテキストプ
 
 各 `WatchEntry` は 2 状態のステートマシンを持つ。
 
-```
-         [condition matches AND cooldown elapsed]
-NOT_FIRING ─────────────────────────────────────► FIRING
-    ▲                                                │
-    │          [condition no longer matches]         │
-    └────────────────────────────────────────────────┘
-         onResolve callback called
+```mermaid
+stateDiagram-v2
+    direction LR
+    [*] --> NOT_FIRING
+    NOT_FIRING --> FIRING : condition matches AND cooldown elapsed
+    FIRING --> NOT_FIRING : condition no longer matches<br/>→ onResolve callback called
 ```
 
 ```
@@ -1119,167 +1118,159 @@ public class MetricsExporter {
 
 ### A.1 コンポーネント相関図
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                       Your Application                          │
-│                                                                 │
-│  SyslenzAgent.startServer(9100)                                 │
-│  SyslenzAgent.registry().gauge("queue_depth", () -> q.size())   │
-│  SyslenzAgent.watch("heap_used").greaterThan(800_000_000)        │
-│      .severity(WARNING).cooldown(30_000).onFire(cb).register()  │
-└─────────────────────────┬───────────────────────────────────────┘
-                          │
-                ┌─────────▼─────────┐
-                │   SyslenzAgent    │  static facade / singleton owner
-                │                   │
-                │  REGISTRY ────────┼──► MetricRegistry
-                │  WATCHES  ────────┼──► WatchRegistry
-                │  serverInstance ──┼──► SyslenzServer (lazy-init)
-                └─────────┬─────────┘
-                          │ startServer() triggers
-                ┌─────────▼─────────┐
-                │   SyslenzServer   │  daemon thread "syslenz-server-N"
-                │                   │
-                │  acceptLoop()     │  ServerSocket + 1s SO_TIMEOUT
-                │  handleClient()   │  reads SNAPSHOT\n, writes JSON\n
-                │  collectSnapshot()│  calls JvmCollector + MetricRegistry
-                │                   │  + WatchRegistry.evaluate()
-                └──────────┬────────┘
-                           │
-           ┌───────────────┼───────────────┐
-           │               │               │
-  ┌────────▼──────┐ ┌──────▼──────┐ ┌─────▼──────────────┐
-  │  JvmCollector │ │MetricRegistry│ │   WatchRegistry    │
-  │               │ │              │ │                    │
-  │ collect()     │ │ collect()    │ │ evaluate(Map)      │
-  │   MemoryMXBean│ │ gauge sup.   │ │   WatchEntry[]     │
-  │   GC MXBeans  │ │ counter sup. │ │     wasFiring      │
-  │   ThreadMXBean│ │ text sup.    │ │     lastFiredAt    │
-  │   RuntimeMXB. │ │              │ │     onFire cb      │
-  │   OS MXBean   │ └──────────────┘ │     onResolve cb   │
-  │   ClassLoad.  │                  └────────────────────┘
-  │   BufferPool  │
-  └───────┬───────┘
-          │  List<Metric>
-  ┌───────▼───────┐
-  │ JsonExporter  │  string concat only (no lib)
-  │               │
-  │ export(...)   │  → ProcEntry JSON
-  └───────┬───────┘
-          │  UTF-8 single-line JSON
-  ┌───────▼───────┐
-  │ syslenz daemon│  --connect localhost:9100
-  └───────────────┘
+```mermaid
+flowchart TD
+    App["**Your Application**<br/>SyslenzAgent.startServer(9100)<br/>SyslenzAgent.registry().gauge(...)<br/>SyslenzAgent.watch(...).register()"]
+    Agent["**SyslenzAgent**<br/>static facade / singleton owner"]
+    MR["**MetricRegistry**<br/>gauge sup. / counter sup. / text sup.<br/>collect()"]
+    WR["**WatchRegistry**<br/>evaluate(Map)<br/>WatchEntry[] wasFiring / lastFiredAt<br/>onFire cb / onResolve cb"]
+    Server["**SyslenzServer**<br/>daemon thread syslenz-server-N<br/>acceptLoop() ServerSocket + 1s SO_TIMEOUT<br/>handleClient() reads SNAPSHOT, writes JSON<br/>collectSnapshot()"]
+    JC["**JvmCollector**<br/>collect()<br/>MemoryMXBean / GC MXBeans<br/>ThreadMXBean / RuntimeMXBean<br/>OS MXBean / ClassLoad / BufferPool"]
+    JE["**JsonExporter**<br/>export() string concat only<br/>→ ProcEntry JSON"]
+    Syslenz["**syslenz daemon**<br/>--connect localhost:9100"]
+
+    App --> Agent
+    Agent -->|holds| MR
+    Agent -->|holds| WR
+    Agent -->|creates| Server
+    Server -->|uses| JC
+    Server -->|uses| MR
+    Server -->|uses| WR
+    JC -->|List&lt;Metric&gt;| JE
+    JE -->|UTF-8 single-line JSON| Syslenz
 ```
 
 ### A.2 スナップショットパイプラインの詳細フロー
 
 `SyslenzServer.collectSnapshot()` が呼ばれたときの内部処理シーケンス:
 
-```
-collectSnapshot()
-  1. JvmCollector jc = new JvmCollector()
-  2. List<Metric> jvmMetrics = jc.collect()
-       ├─ collectMemory(metrics)        // MemoryMXBean
-       ├─ collectGc(metrics)            // GarbageCollectorMXBean[]
-       ├─ collectThreads(metrics)       // ThreadMXBean
-       ├─ collectRuntime(metrics)       // RuntimeMXBean
-       ├─ collectOs(metrics)            // OperatingSystemMXBean
-       ├─ collectClassLoading(metrics)  // ClassLoadingMXBean
-       └─ collectBufferPools(metrics)   // BufferPoolMXBean[]
-
-  3. List<Metric> customMetrics = registry.collect()
-       └─ foreach Registration in ConcurrentHashMap:
-            try { evaluate supplier } catch { skip }
-            → "text" → Text Metric
-            → Long/Integer/AtomicLong → Integer Metric (unit: "count")
-            → other Number → Float Metric
-
-  4. if (watchRegistry != null):
-       Map<String, Double> metricValues = new HashMap<>()
-       foreach jvmMetric with Number value:
-           metricValues.put(name, doubleValue)
-       foreach customMetric with Number value:
-           metricValues.put("app_" + name, doubleValue)  // with prefix
-           metricValues.put(name_without_app, doubleValue)  // without prefix
-       watchRegistry.evaluate(metricValues)
-
-  5. String json = JsonExporter.export(jvmMetrics, customMetrics)
-  6. return json.replace("\n", "").replace("\r", "")
+```mermaid
+flowchart TD
+    S([collectSnapshot])
+    S --> S1[1. new JvmCollector]
+    S1 --> S2["2. jc.collect() → jvmMetrics<br/>collectMemory — MemoryMXBean<br/>collectGc — GarbageCollectorMXBean[]<br/>collectThreads — ThreadMXBean<br/>collectRuntime — RuntimeMXBean<br/>collectOs — OperatingSystemMXBean<br/>collectClassLoading — ClassLoadingMXBean<br/>collectBufferPools — BufferPoolMXBean[]"]
+    S2 --> S3["3. registry.collect() → customMetrics<br/>foreach Registration in ConcurrentHashMap<br/>try evaluate supplier / catch skip<br/>text → Text Metric<br/>Long/Integer/AtomicLong → Integer Metric<br/>other Number → Float Metric"]
+    S3 --> S4{watchRegistry != null?}
+    S4 -- No --> S5
+    S4 -- Yes --> W1["4. build metricValues Map<br/>jvmMetrics: put name → doubleValue<br/>customMetrics: put app_name → doubleValue<br/>put name_without_app → doubleValue"]
+    W1 --> W2[watchRegistry.evaluate metricValues]
+    W2 --> S5["5. JsonExporter.export(jvmMetrics, customMetrics)"]
+    S5 --> S6["6. return json.replace newlines"]
+    S6 --> E([return single-line JSON])
 ```
 
 ### A.3 TCP サーバー内部スレッドモデル
 
-```
-Main Thread (application)
-  └─ SyslenzAgent.startServer(9100)
-       └─ synchronized(SyslenzAgent.class) {
-              SyslenzServer server = new SyslenzServer(9100, "0.0.0.0", ...)
-              server.start()
-              serverInstance = server
-          }
+```mermaid
+flowchart TD
+    subgraph MT["Main Thread (application)"]
+        MT1[SyslenzAgent.startServer 9100]
+        MT2["synchronized SyslenzAgent.class<br/>new SyslenzServer(9100, 0.0.0.0, ...)<br/>server.start()<br/>serverInstance = server"]
+        MT1 --> MT2
+    end
 
-Daemon Thread: "syslenz-server-9100"
-  └─ SyslenzServer.acceptLoop()
-       └─ ServerSocket.bind(9100)
-            └─ loop while (running):
-                 try { client = serverSocket.accept() } // 1s SO_TIMEOUT
-                 catch SocketTimeoutException { continue }  // check running
-                 try { handleClient(client) }
-                 catch Exception { System.err.println }
-                 finally { client.close() }
+    subgraph DT["Daemon Thread: syslenz-server-9100"]
+        DT1[SyslenzServer.acceptLoop]
+        DT2[ServerSocket.bind 9100]
+        DT3{"loop while running"}
+        DT4["serverSocket.accept() — 1s SO_TIMEOUT"]
+        DT5{SocketTimeoutException?}
+        DT6[handleClient client]
+        DT7[client.close — finally]
+        DT8[System.err.println — catch Exception]
 
-  handleClient(socket):
-    socket.setSoTimeout(30_000)
-    BufferedReader reader ...
-    while ((line = reader.readLine()) != null):
-        if "SNAPSHOT".equalsIgnoreCase(line.trim()):
-            String json = collectSnapshot()
-            out.write(json.getBytes("UTF-8"))
-            out.write('\n')
-            out.flush()
-        // else: silently ignore
+        DT1 --> DT2 --> DT3
+        DT3 -->|try| DT4
+        DT4 --> DT5
+        DT5 -->|Yes — continue| DT3
+        DT5 -->|No — socket accepted| DT6
+        DT6 --> DT7
+        DT6 -->|Exception| DT8
+        DT7 --> DT3
+    end
+
+    subgraph HC["handleClient socket"]
+        HC1["socket.setSoTimeout 30_000<br/>BufferedReader reader"]
+        HC2{readLine != null?}
+        HC3{"SNAPSHOT".equalsIgnoreCase?}
+        HC4["collectSnapshot()<br/>out.write JSON bytes<br/>out.write newline<br/>out.flush()"]
+        HC5[silently ignore]
+        HC6([connection closed])
+
+        HC1 --> HC2
+        HC2 -->|Yes| HC3
+        HC3 -->|Yes| HC4
+        HC4 --> HC2
+        HC3 -->|No| HC5
+        HC5 --> HC2
+        HC2 -->|No / EOF| HC6
+    end
+
+    MT2 -.->|spawns| DT1
+    DT6 -.->|calls| HC1
 ```
 
 クライアント接続は逐次処理 (sequential)。複数の syslenz インスタンスが同じポートに同時接続した場合、後続接続は前の接続が完了するまで accept されない。通常の監視ユースケース (syslenz が 10–60 秒ごとにポーリング) では問題にならない。
 
 ### A.4 Watch API の内部データ構造
 
-```
-SyslenzAgent (static)
-  └─ WatchRegistry WATCHES (singleton)
-       └─ CopyOnWriteArrayList<WatchEntry> entries
-            └─ WatchEntry [per register() call]
-                 ├─ WatchCondition condition
-                 │    ├─ String metricName
-                 │    ├─ Operator operator
-                 │    ├─ double threshold
-                 │    ├─ double rangeMin, rangeMax
-                 │    ├─ Severity severity
-                 │    ├─ long cooldownMs
-                 │    ├─ Consumer<WatchEvent> onFire
-                 │    ├─ Consumer<WatchEvent> onResolve
-                 │    └─ CompoundCondition compound (nullable)
-                 │         ├─ String metricName
-                 │         ├─ Operator operator
-                 │         └─ double threshold
-                 ├─ boolean wasFiring (mutable)
-                 └─ long lastFiredAt (mutable, epoch ms)
+```mermaid
+classDiagram
+    class SyslenzAgent_static {
+        <<static>>
+        +WatchRegistry WATCHES
+    }
+    class WatchRegistry_singleton {
+        <<singleton>>
+        +CopyOnWriteArrayList~WatchEntry~ entries
+    }
+    class WatchEntry {
+        +WatchCondition condition
+        +boolean wasFiring
+        +long lastFiredAt
+    }
+    class WatchCondition {
+        +String metricName
+        +Operator operator
+        +double threshold
+        +double rangeMin
+        +double rangeMax
+        +Severity severity
+        +long cooldownMs
+        +Consumer~WatchEvent~ onFire
+        +Consumer~WatchEvent~ onResolve
+        +CompoundCondition compound
+    }
+    class CompoundCondition {
+        +String metricName
+        +Operator operator
+        +double threshold
+    }
+
+    SyslenzAgent_static --> WatchRegistry_singleton : WATCHES
+    WatchRegistry_singleton --> WatchEntry : entries 0..*
+    WatchEntry --> WatchCondition : condition
+    WatchCondition --> CompoundCondition : compound nullable
 ```
 
 `WatchCondition` は `register()` 後も変更可能なフィールドを持つが、登録後の変更はサポート外の動作 (undefined behavior)。`register()` 後は `WatchCondition` への参照を破棄することを推奨する。
 
 ### A.5 MetricRegistry の内部データ構造
 
-```
-MetricRegistry
-  └─ ConcurrentHashMap<String, Registration> registrations
-       └─ Registration
-            ├─ String name           // 登録時の名前 ("queue_depth")
-            ├─ String description    // 説明文
-            ├─ String kind           // "gauge" | "counter" | "text"
-            ├─ NumberSupplier numberFn  // gauge/counter 用 (nullable)
-            └─ StringSupplier stringFn  // text 用 (nullable)
+```mermaid
+classDiagram
+    class MetricRegistry {
+        +ConcurrentHashMap~String_Registration~ registrations
+    }
+    class Registration {
+        +String name
+        +String description
+        +String kind
+        +NumberSupplier numberFn
+        +StringSupplier stringFn
+    }
+
+    MetricRegistry --> Registration : registrations 0..*
 ```
 
 同一名前で再登録すると `ConcurrentHashMap.put()` により上書きされる。古い `Registration` への参照は次の GC で回収される。
@@ -1793,13 +1784,13 @@ classDiagram
 stateDiagram-v2
     [*] --> NOT_FIRING : register()
 
-    NOT_FIRING --> FIRING : condition == true\nAND compound == true\nAND (now - lastFiredAt) >= cooldownMs\n→ wasFiring=true, lastFiredAt=now\n→ onFire callback
+    NOT_FIRING --> FIRING : condition == true<br/>AND compound == true<br/>AND (now - lastFiredAt) >= cooldownMs<br/>→ wasFiring=true, lastFiredAt=now<br/>→ onFire callback
 
-    FIRING --> NOT_FIRING : condition == false\nOR compound == false\n→ wasFiring=false\n→ onResolve callback
+    FIRING --> NOT_FIRING : condition == false<br/>OR compound == false<br/>→ wasFiring=false<br/>→ onResolve callback
 
-    NOT_FIRING --> NOT_FIRING : condition == true\nBUT cooldown not elapsed\n(suppressed)
+    NOT_FIRING --> NOT_FIRING : condition == true<br/>BUT cooldown not elapsed<br/>(suppressed)
 
-    FIRING --> FIRING : condition still true\n(no re-fire)
+    FIRING --> FIRING : condition still true<br/>(no re-fire)
 
     note right of NOT_FIRING
         wasFiring = false
@@ -1828,7 +1819,7 @@ sequenceDiagram
     App->>Agent: startServer(port)
     Agent->>Server: new SyslenzServer(port, bindAddress)
     Agent->>Server: start()
-    Server-->>Server: ServerSocket.bind(port)\ndaemon thread "syslenz-server-<port>"
+    Server-->>Server: ServerSocket.bind(port)<br/>daemon thread "syslenz-server-&lt;port&gt;"
 
     loop accept loop (SO_TIMEOUT=1000ms)
         Server-->>Server: accept() → wait for connection
@@ -1838,7 +1829,7 @@ sequenceDiagram
     Server-->>Server: accept() returns socket
 
     Client->>Server: "SNAPSHOT\n"
-    Server-->>Server: collectSnapshot()\n  JvmCollector.collect()\n  MetricRegistry.collect()\n  WatchRegistry.evaluate(metricValues)\n  JsonExporter.export()\n  strip newlines
+    Server-->>Server: collectSnapshot()<br/>JvmCollector.collect()<br/>MetricRegistry.collect()<br/>WatchRegistry.evaluate(metricValues)<br/>JsonExporter.export()<br/>strip newlines
 
     Server->>Client: JSON (1 line) + "\n"
 
@@ -1851,7 +1842,7 @@ sequenceDiagram
 
     App->>Agent: stopServer()
     Agent->>Server: stop()
-    Server-->>Server: running=false\nServerSocket.close()\nSocketException → loop exit
+    Server-->>Server: running=false<br/>ServerSocket.close()<br/>SocketException → loop exit
 ```
 
 ### G.4 フローチャート (Flowchart) — 閾値評価ロジック
@@ -1860,26 +1851,26 @@ sequenceDiagram
 
 ```mermaid
 flowchart TD
-    A([evaluate called\nmetricValues map]) --> B{entry in entries}
-    B -- 次のエントリ --> C{metricValues に\nmetricName あり?}
+    A([evaluate called<br/>metricValues map]) --> B{entry in entries}
+    B -- 次のエントリ --> C{metricValues に<br/>metricName あり?}
     C -- No --> B
-    C -- Yes --> D[value = metricValues.get\nmetricName]
-    D --> E{primaryCondition\nevaluate値 == true?}
-    E -- No --> N{wasFiring\n== true?}
-    E -- Yes --> F{compound\n!= null?}
+    C -- Yes --> D[value = metricValues.get<br/>metricName]
+    D --> E{primaryCondition<br/>evaluate値 == true?}
+    E -- No --> N{wasFiring<br/>== true?}
+    E -- Yes --> F{compound<br/>!= null?}
     F -- No --> H
-    F -- Yes --> G{secondary metric\nあり?}
+    F -- Yes --> G{secondary metric<br/>あり?}
     G -- No --> N
-    G -- Yes --> I{compound\nevaluate値 == true?}
+    G -- Yes --> I{compound<br/>evaluate値 == true?}
     I -- No --> N
-    I -- Yes --> H{wasFiring\n== false?}
-    H -- No\nalready firing --> B
-    H -- Yes --> J{cooldown\n経過?}
+    I -- Yes --> H{wasFiring<br/>== false?}
+    H -- "No<br/>already firing" --> B
+    H -- Yes --> J{cooldown<br/>経過?}
     J -- No --> B
-    J -- Yes --> K[wasFiring = true\nlastFiredAt = now\nonFire callback]
+    J -- Yes --> K[wasFiring = true<br/>lastFiredAt = now<br/>onFire callback]
     K --> B
-    N -- No\nnot firing --> B
-    N -- Yes --> M[wasFiring = false\nonResolve callback]
+    N -- "No<br/>not firing" --> B
+    N -- Yes --> M[wasFiring = false<br/>onResolve callback]
     M --> B
     B -- 全エントリ完了 --> Z([done])
 ```
