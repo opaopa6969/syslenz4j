@@ -219,27 +219,27 @@ public record WatchEvent(
 
 `WatchRegistry` は内部クラスですが、デバッグに役立つ情報として紹介します。
 
-```
-WatchRegistry
-  entries: CopyOnWriteArrayList<WatchEntry>
-    WatchEntry
-      condition: WatchCondition
-      wasFiring: boolean
-      lastFiredAt: long（エポック ms）
+```mermaid
+classDiagram
+    class WatchRegistry {
+        +CopyOnWriteArrayList~WatchEntry~ entries
+    }
+    class WatchEntry {
+        +WatchCondition condition
+        +boolean wasFiring
+        +long lastFiredAt
+    }
+    WatchRegistry "1" --> "*" WatchEntry
 ```
 
 `evaluate(Map<String, Double> currentValues)` はメトリクス名 → 値のマップで呼ばれ、すべてのエントリを反復して[アーキテクチャドキュメント](architecture-ja.md)で説明したステートマシンを適用します。
 
 ### ステートマシン
 
-```
-NOT_FIRING（未発火）
-  │  [条件成立 AND クールダウン経過]
-  ▼
-FIRING（発火中）  ──── onFire コールバック呼び出し
-  │  [条件が成立しなくなった]
-  ▼
-NOT_FIRING（未発火）  ──── onResolve コールバック呼び出し
+```mermaid
+stateDiagram-v2
+    NOT_FIRING --> FIRING: 条件成立 AND クールダウン経過<br/>(onFire コールバック)
+    FIRING --> NOT_FIRING: 条件が成立しなくなった<br/>(onResolve コールバック)
 ```
 
 クールダウンは NOT_FIRING → FIRING の遷移にのみ適用されます。FIRING → NOT_FIRING にはクールダウンはありません。

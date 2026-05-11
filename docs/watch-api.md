@@ -219,27 +219,27 @@ public record WatchEvent(
 
 `WatchRegistry` is an internal class, but understanding it helps with debugging.
 
-```
-WatchRegistry
-  entries: CopyOnWriteArrayList<WatchEntry>
-    WatchEntry
-      condition: WatchCondition
-      wasFiring: boolean
-      lastFiredAt: long (epoch ms)
+```mermaid
+classDiagram
+    class WatchRegistry {
+        +CopyOnWriteArrayList~WatchEntry~ entries
+    }
+    class WatchEntry {
+        +WatchCondition condition
+        +boolean wasFiring
+        +long lastFiredAt
+    }
+    WatchRegistry "1" --> "*" WatchEntry
 ```
 
 `evaluate(Map<String, Double> currentValues)` is called with a metric name → value map. It iterates all entries and applies the state machine described in [architecture.md](architecture.md).
 
 ### State Machine
 
-```
-NOT_FIRING
-  │  [condition matches AND cooldown elapsed]
-  ▼
-FIRING  ──── onFire callback called
-  │  [condition no longer matches]
-  ▼
-NOT_FIRING  ──── onResolve callback called
+```mermaid
+stateDiagram-v2
+    NOT_FIRING --> FIRING: condition matches AND cooldown elapsed<br/>(onFire callback)
+    FIRING --> NOT_FIRING: condition no longer matches<br/>(onResolve callback)
 ```
 
 Cooldown applies only to the NOT_FIRING → FIRING transition. There is no cooldown on FIRING → NOT_FIRING.

@@ -8,47 +8,21 @@ syslenz4j is a zero-dependency Java library that bridges JVM internals to the sy
 
 ## Component Overview
 
-```
-┌─────────────────────────────────────────────────┐
-│                 Your Application                │
-│                                                 │
-│  SyslenzAgent.startServer(9100)                 │
-│  SyslenzAgent.registry().gauge(...)             │
-│  SyslenzAgent.watch(...).greaterThan(...).register() │
-└──────────────┬──────────────────────────────────┘
-               │
-       ┌───────▼───────┐
-       │ SyslenzAgent  │  ← singleton facade
-       │               │
-       │ MetricRegistry│  ← custom metric suppliers
-       │ WatchRegistry │  ← alert conditions
-       │ SyslenzServer │  ← TCP listener
-       └───────┬───────┘
-               │
-       ┌───────▼──────────────────────────┐
-       │          Snapshot Pipeline       │
-       │                                  │
-       │  JvmCollector.collect()          │
-       │     └─ MemoryMXBean              │
-       │     └─ GarbageCollectorMXBean[]  │
-       │     └─ ThreadMXBean              │
-       │     └─ RuntimeMXBean             │
-       │     └─ OperatingSystemMXBean     │
-       │     └─ ClassLoadingMXBean        │
-       │     └─ BufferPoolMXBean[]        │
-       │                                  │
-       │  MetricRegistry.collect()        │
-       │     └─ registered gauges         │
-       │     └─ registered counters       │
-       │     └─ registered text values    │
-       │                                  │
-       │  JsonExporter.export(...)        │
-       └──────────────┬───────────────────┘
-                      │  ProcEntry JSON (1 line)
-              ┌───────▼───────┐
-              │ syslenz daemon│
-              │ (--connect)   │
-              └───────────────┘
+```mermaid
+flowchart TB
+    App["Your Application<br/>SyslenzAgent.startServer(9100)<br/>SyslenzAgent.registry().gauge(...)<br/>SyslenzAgent.watch(...).greaterThan(...).register()"]
+    Agent["SyslenzAgent (singleton facade)<br/>MetricRegistry — custom metric suppliers<br/>WatchRegistry — alert conditions<br/>SyslenzServer — TCP listener"]
+    Pipeline["Snapshot Pipeline"]
+    JVM["JvmCollector.collect()<br/>MemoryMXBean, GarbageCollectorMXBean[],<br/>ThreadMXBean, RuntimeMXBean,<br/>OperatingSystemMXBean, ClassLoadingMXBean,<br/>BufferPoolMXBean[]"]
+    Reg["MetricRegistry.collect()<br/>registered gauges / counters / text values"]
+    Exporter["JsonExporter.export(...)"]
+    Daemon["syslenz daemon<br/>(--connect)"]
+    App --> Agent
+    Agent --> Pipeline
+    Pipeline --> JVM
+    Pipeline --> Reg
+    Pipeline --> Exporter
+    Exporter -- "ProcEntry JSON (1 line)" --> Daemon
 ```
 
 ---
@@ -131,11 +105,13 @@ TCP connection on port P
 
 `SyslenzServer` uses a single daemon thread with blocking I/O:
 
-```
-acceptLoop (daemon thread)
-  └─ serverSocket.accept()      ← wakes up every 1 s to check running flag
-       └─ handleClient(socket)  ← processes all commands on that socket
-            └─ reader.readLine() loop until EOF or timeout
+```mermaid
+flowchart TB
+    AL["acceptLoop (daemon thread)"]
+    Accept["serverSocket.accept()<br/>wakes up every 1 s to check running flag"]
+    Handle["handleClient(socket)<br/>processes all commands on that socket"]
+    Read["reader.readLine() loop<br/>until EOF or timeout"]
+    AL --> Accept --> Handle --> Read
 ```
 
 Connections are handled sequentially. This is adequate for monitoring tools that poll every few seconds. If multiple concurrent syslenz connections are needed, the server would need a per-connection thread pool — not implemented in v1.1.0.
@@ -148,16 +124,15 @@ Connections are handled sequentially. This is adequate for monitoring tools that
 
 `SyslenzAgent.watch(metricName)` constructs a `WatchCondition` and returns it. Calling `.register()` on the builder adds it to `WatchRegistry`. The builder holds all configuration immutably after `register()`.
 
-```
+```java
 SyslenzAgent.watch("heap_used")
     .greaterThan(1_073_741_824L)
     .severity(Severity.WARNING)
     .cooldown(60_000)
     .onFire(callback)
-    .register()
-        │
-        └─► WatchRegistry.add(WatchCondition)
-                └─► entries: CopyOnWriteArrayList<WatchEntry>
+    .register();
+// → WatchRegistry.add(WatchCondition)
+//   → entries: CopyOnWriteArrayList<WatchEntry>
 ```
 
 ### Evaluation
@@ -174,12 +149,10 @@ SyslenzAgent.watch("heap_used")
 
 The cooldown prevents repeated `onFire` invocations when a metric hovers near the threshold.
 
-```
-State machine per WatchEntry:
-
-  NOT_FIRING ──[matches & cooldown ok]──► FIRING
-     ▲                                      │
-     └──────────[no longer matches]─────────┘
+```mermaid
+stateDiagram-v2
+    NOT_FIRING --> FIRING: matches & cooldown ok
+    FIRING --> NOT_FIRING: no longer matches
 ```
 
 ### Known Issue: Evaluate Not Wired

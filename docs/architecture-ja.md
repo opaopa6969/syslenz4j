@@ -8,47 +8,21 @@ syslenz4j は依存ゼロの Java ライブラリで、JVM 内部情報を sysle
 
 ## コンポーネント概要
 
-```
-┌─────────────────────────────────────────────────┐
-│              アプリケーション                    │
-│                                                 │
-│  SyslenzAgent.startServer(9100)                 │
-│  SyslenzAgent.registry().gauge(...)             │
-│  SyslenzAgent.watch(...).greaterThan(...).register() │
-└──────────────┬──────────────────────────────────┘
-               │
-       ┌───────▼───────┐
-       │ SyslenzAgent  │  ← シングルトンファサード
-       │               │
-       │ MetricRegistry│  ← カスタムメトリクスサプライヤー
-       │ WatchRegistry │  ← アラート条件
-       │ SyslenzServer │  ← TCP リスナー
-       └───────┬───────┘
-               │
-       ┌───────▼──────────────────────────┐
-       │        スナップショットパイプライン │
-       │                                  │
-       │  JvmCollector.collect()          │
-       │     └─ MemoryMXBean              │
-       │     └─ GarbageCollectorMXBean[]  │
-       │     └─ ThreadMXBean              │
-       │     └─ RuntimeMXBean             │
-       │     └─ OperatingSystemMXBean     │
-       │     └─ ClassLoadingMXBean        │
-       │     └─ BufferPoolMXBean[]        │
-       │                                  │
-       │  MetricRegistry.collect()        │
-       │     └─ 登録済みゲージ            │
-       │     └─ 登録済みカウンター        │
-       │     └─ 登録済みテキスト値        │
-       │                                  │
-       │  JsonExporter.export(...)        │
-       └──────────────┬───────────────────┘
-                      │  ProcEntry JSON (1行)
-              ┌───────▼───────┐
-              │ syslenz デーモン│
-              │ (--connect)   │
-              └───────────────┘
+```mermaid
+flowchart TB
+    App["アプリケーション<br/>SyslenzAgent.startServer(9100)<br/>SyslenzAgent.registry().gauge(...)<br/>SyslenzAgent.watch(...).greaterThan(...).register()"]
+    Agent["SyslenzAgent (シングルトンファサード)<br/>MetricRegistry — カスタムメトリクスサプライヤー<br/>WatchRegistry — アラート条件<br/>SyslenzServer — TCP リスナー"]
+    Pipeline["スナップショットパイプライン"]
+    JVM["JvmCollector.collect()<br/>MemoryMXBean, GarbageCollectorMXBean[],<br/>ThreadMXBean, RuntimeMXBean,<br/>OperatingSystemMXBean, ClassLoadingMXBean,<br/>BufferPoolMXBean[]"]
+    Reg["MetricRegistry.collect()<br/>登録済みゲージ / カウンター / テキスト値"]
+    Exporter["JsonExporter.export(...)"]
+    Daemon["syslenz デーモン<br/>(--connect)"]
+    App --> Agent
+    Agent --> Pipeline
+    Pipeline --> JVM
+    Pipeline --> Reg
+    Pipeline --> Exporter
+    Exporter -- "ProcEntry JSON (1行)" --> Daemon
 ```
 
 ---
@@ -131,11 +105,13 @@ TCP 接続（ポート P）
 
 `SyslenzServer` はブロッキング I/O を使用する単一の daemon スレッドで動作します:
 
-```
-acceptLoop（daemon スレッド）
-  └─ serverSocket.accept()      ← 1秒ごとに running フラグを確認
-       └─ handleClient(socket)  ← そのソケットのすべてのコマンドを処理
-            └─ reader.readLine() ループ（EOF またはタイムアウトまで）
+```mermaid
+flowchart TB
+    AL["acceptLoop（daemon スレッド）"]
+    Accept["serverSocket.accept()<br/>1秒ごとに running フラグを確認"]
+    Handle["handleClient(socket)<br/>そのソケットのすべてのコマンドを処理"]
+    Read["reader.readLine() ループ<br/>EOF またはタイムアウトまで"]
+    AL --> Accept --> Handle --> Read
 ```
 
 接続は逐次処理されます。数秒ごとにポーリングする監視ツールには十分です。複数の同時接続が必要な場合は、接続ごとのスレッドプールが必要ですが、v1.1.0 では未実装です。
@@ -148,16 +124,15 @@ acceptLoop（daemon スレッド）
 
 `SyslenzAgent.watch(metricName)` は `WatchCondition` を構築して返します。ビルダーの `.register()` を呼ぶと `WatchRegistry` に追加されます。`register()` 後のビルダーはすべての設定を不変として保持します。
 
-```
+```java
 SyslenzAgent.watch("heap_used")
     .greaterThan(1_073_741_824L)
     .severity(Severity.WARNING)
     .cooldown(60_000)
     .onFire(callback)
-    .register()
-        │
-        └─► WatchRegistry.add(WatchCondition)
-                └─► entries: CopyOnWriteArrayList<WatchEntry>
+    .register();
+// → WatchRegistry.add(WatchCondition)
+//   → entries: CopyOnWriteArrayList<WatchEntry>
 ```
 
 ### 評価
@@ -174,12 +149,12 @@ SyslenzAgent.watch("heap_used")
 
 クールダウンは、メトリクスが閾値付近で揺れている場合に `onFire` が繰り返し呼ばれるのを防ぎます。
 
-```
 WatchEntry ごとのステートマシン:
 
-  NOT_FIRING ──[成立 & クールダウン経過]──► FIRING
-     ▲                                        │
-     └────────────[成立しなくなった]──────────┘
+```mermaid
+stateDiagram-v2
+    NOT_FIRING --> FIRING: 成立 & クールダウン経過
+    FIRING --> NOT_FIRING: 成立しなくなった
 ```
 
 ### 既知の問題: evaluate が接続されていない
