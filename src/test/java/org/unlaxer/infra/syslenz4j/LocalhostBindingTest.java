@@ -42,13 +42,13 @@ class LocalhostBindingTest {
     }
 
     @Test
-    void startServerDefaultBindsToAllInterfaces() throws Exception {
+    void startServerDefaultBindsToLoopback() throws Exception {
         int port = 19192;
-        SyslenzAgent.startServer(port); // default: 0.0.0.0
+        SyslenzAgent.startServer(port); // default: 127.0.0.1
 
         Thread.sleep(200);
 
-        // Should be reachable via 127.0.0.1 too (loopback is part of 0.0.0.0)
+        // Should be reachable via 127.0.0.1 (default loopback bind)
         try (Socket socket = new Socket("127.0.0.1", port)) {
             assertTrue(socket.isConnected());
         }
