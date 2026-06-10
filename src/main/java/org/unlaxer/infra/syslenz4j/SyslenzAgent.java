@@ -43,12 +43,14 @@ public final class SyslenzAgent {
      * <p>デーモンスレッドで動作し、JVM のシャットダウンを妨げない。
      * {@code SNAPSHOT\n} コマンドに ProcEntry JSON で応答する。
      * 複数回呼んでも安全（既に起動中なら無視）。
-     * バインドアドレスは {@code 0.0.0.0}（全インタフェース）。
+     * デフォルトのバインドアドレスは {@code 127.0.0.1}（ループバックのみ）。
+     * 外部インタフェースへの公開が必要な場合は
+     * {@link #startServer(int, String)} で明示的に指定してください。
      *
      * @param port TCP ポート（例: 9100）
      */
     public static void startServer(int port) {
-        startServer(port, "0.0.0.0");
+        startServer(port, "127.0.0.1");
     }
 
     /**

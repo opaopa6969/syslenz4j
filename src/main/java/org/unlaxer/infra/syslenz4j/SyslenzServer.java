@@ -10,6 +10,9 @@ import java.net.SocketTimeoutException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Lightweight TCP server compatible with the {@code syslenz --connect} protocol.
@@ -22,10 +25,9 @@ import java.util.Map;
  *   <li>Connection may be kept open for further requests or closed by either side.</li>
  * </ol>
  *
- * <p>The server runs on a single daemon thread using blocking I/O. Each
- * accepted connection is handled sequentially (adequate for a monitoring
- * endpoint that is polled every few seconds). If higher concurrency is
- * needed, wrap the handler in a thread pool.
+ * <p>The server runs on a single daemon thread for accepting connections.
+ * Each accepted connection is dispatched to a worker thread pool so that
+ * idle or slow clients cannot block other connections.
  */
 public class SyslenzServer {
 
@@ -39,14 +41,15 @@ public class SyslenzServer {
     private volatile ServerSocket serverSocket;
     private volatile Thread serverThread;
     private volatile boolean running;
+    private ExecutorService workerPool;
 
     SyslenzServer(int port, MetricRegistry registry) {
-        this(port, "0.0.0.0", registry, null);
+        this(port, "127.0.0.1", registry, null);
     }
 
     SyslenzServer(int port, String bindAddress, MetricRegistry registry, WatchRegistry watchRegistry) {
         this.port = port;
-        this.bindAddress = bindAddress != null ? bindAddress : "0.0.0.0";
+        this.bindAddress = bindAddress != null ? bindAddress : "127.0.0.1";
         this.registry = registry;
         this.watchRegistry = watchRegistry;
     }
@@ -57,6 +60,12 @@ public class SyslenzServer {
     void start() {
         if (running) return;
         running = true;
+
+        workerPool = Executors.newCachedThreadPool(r -> {
+            Thread t = new Thread(r, "syslenz-worker-" + port);
+            t.setDaemon(true);
+            return t;
+        });
 
         serverThread = new Thread(this::acceptLoop, "syslenz-server-" + port);
         serverThread.setDaemon(true);
@@ -76,6 +85,15 @@ public class SyslenzServer {
         } catch (IOException ignored) {
             // best effort
         }
+        ExecutorService pool = workerPool;
+        if (pool != null) {
+            pool.shutdown();
+            try {
+                pool.awaitTermination(5, TimeUnit.SECONDS);
+            } catch (InterruptedException ignored) {
+                Thread.currentThread().interrupt();
+            }
+        }
     }
 
     // ----- Internal ------------------------------------------------------
@@ -93,14 +111,17 @@ public class SyslenzServer {
                 } catch (SocketTimeoutException e) {
                     continue; // check running flag
                 }
-                try {
-                    handleClient(client);
-                } catch (Exception e) {
-                    // Log to stderr but don't crash the server
-                    System.err.println("[syslenz-server] client error: " + e.getMessage());
-                } finally {
-                    try { client.close(); } catch (IOException ignored) {}
-                }
+                final Socket finalClient = client;
+                workerPool.submit(() -> {
+                    try {
+                        handleClient(finalClient);
+                    } catch (Exception e) {
+                        // Log to stderr but don't crash the server
+                        System.err.println("[syslenz-server] client error: " + e.getMessage());
+                    } finally {
+                        try { finalClient.close(); } catch (IOException ignored) {}
+                    }
+                });
             }
         } catch (SocketException e) {
             if (running) {
@@ -126,8 +147,13 @@ public class SyslenzServer {
                 out.write(json.getBytes("UTF-8"));
                 out.write('\n');
                 out.flush();
+            } else {
+                // Unknown command: return an error response and close the connection
+                String error = "ERROR unknown command: " + trimmed + "\n";
+                out.write(error.getBytes("UTF-8"));
+                out.flush();
+                return;
             }
-            // Unknown commands are silently ignored
         }
     }
 
