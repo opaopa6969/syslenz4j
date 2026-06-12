@@ -290,15 +290,16 @@ SyslenzAgent.watch("app_queue_size")
 
 #### 2.4.1 プロトコル
 
-syslenz `--connect` プロトコルに準拠するシンプルなテキストプロトコル:
+syslenz `--connect` プロトコルに準拠するシンプルなテキストプロトコル (`syslenz --serve` と同じ振る舞い):
 
 1. クライアントが TCP 接続を確立する
 2. クライアントが `SNAPSHOT\n` を送信する
-3. サーバーが ProcEntry JSON を 1 行 (末尾 `\n`) で返す
-4. 接続は継続または双方から close される
+3. サーバーが Snapshot JSON (`{"timestamp": ..., "entries": {"jvm": <ProcEntry>}, "alerts": [...]}`) を 1 行 (末尾 `\n`) で返し、**接続を close する** (1 リクエスト 1 接続)
+4. `QUIT` または空行は応答なしで接続を close する
 
+- 1 リクエスト 1 接続なのは、syslenz クライアント (`capture_tcp`) が応答を EOF まで読むため。接続を維持するとクライアントは read タイムアウトまでブロックする
 - コマンドは case-insensitive (`SNAPSHOT`, `snapshot`, `Snapshot` いずれも有効)
-- 未知のコマンドはサイレントに無視する
+- 未知のコマンドには `ERROR unknown command: <cmd>` を 1 行返して接続を close する
 - ソケットタイムアウト: `SO_TIMEOUT = 30_000ms`
 
 #### 2.4.2 実装特性
@@ -312,30 +313,49 @@ syslenz `--connect` プロトコルに準拠するシンプルなテキストプ
 
 #### 2.4.3 JSON 出力の正規化
 
-`JsonExporter.export()` の出力に含まれる改行文字 (`\n`, `\r`) は `collectSnapshot()` 内で除去され、必ず 1 行の JSON として送信される。
+`JsonExporter` の出力に含まれる改行文字 (`\n`, `\r`) は `collectSnapshot()` 内で除去され、必ず 1 行の JSON として送信される。
 
 ### 2.5 JSON エクスポート (JsonExporter)
 
-外部 JSON ライブラリを一切使用せず、文字列結合のみで syslenz ProcEntry フォーマットを生成する。
+外部 JSON ライブラリを一切使用せず、文字列結合のみで syslenz 互換フォーマットを生成する。
+
+- `export()` — ProcEntry 単体 (stdout プラグインモード用)
+- `exportSnapshot()` — Snapshot ラッパー (TCP サーバー用。syslenz `--connect` がパースする形)
 
 #### 2.5.1 出力フォーマット
 
+TCP サーバーの応答 (`exportSnapshot()`):
+
 ```json
 {
-  "source": "jvm/pid-12345",
-  "fields": [
-    {"name": "heap_used", "value": {"Bytes": 524288000}, "unit": null, "description": "Current heap memory usage"},
-    {"name": "gc_g1_young_generation_count", "value": {"Integer": 42}, "unit": "count", "description": "GC count for G1 Young Generation"},
-    {"name": "vm_name", "value": {"Text": "OpenJDK 64-Bit Server VM"}, "unit": null, "description": "JVM implementation name"},
-    {"name": "app_queue_depth", "value": {"Float": 1234.0}, "unit": null, "description": "Processing queue depth"}
+  "timestamp": "2026-06-12T01:02:03.456Z",
+  "entries": {
+    "jvm": {
+      "source": "jvm/pid-12345",
+      "fields": [
+        {"name": "heap_used", "value": {"Bytes": 524288000}, "unit": null, "description": "Current heap memory usage"},
+        {"name": "gc_g1_young_generation_count", "value": {"Integer": 42}, "unit": "count", "description": "GC count for G1 Young Generation"},
+        {"name": "vm_name", "value": {"Text": "OpenJDK 64-Bit Server VM"}, "unit": null, "description": "JVM implementation name"},
+        {"name": "app_queue_depth", "value": {"Float": 1234.0}, "unit": null, "description": "Processing queue depth"}
+      ]
+    }
+  },
+  "alerts": [
+    {"name": "queue_size", "severity": "critical", "value": 250.0,
+     "message": "[critical] queue_size > 100 (value: 250.00)",
+     "condition": "> 100", "since": "2026-06-12T01:02:00Z"}
   ]
 }
 ```
 
+- `timestamp` は ISO 8601 UTC (`DateTimeFormatter.ISO_INSTANT`)
 - `source` は `ProcessHandle.current().pid()` から取得した PID を含む
 - `value` は型タグ付きオブジェクト: `{"Bytes": N}`, `{"Integer": N}`, `{"Float": F}`, `{"Duration": F}`, `{"Text": "..."}` のいずれか
 - `unit` は `null` またはクォートされた文字列
-- JSON エスケープ: `"`, `\`, `\n`, `\r`, `\t`, U+0000–U+001F をエスケープする
+- `alerts` は現在発火中の Watch 条件の一覧。**発火中の Watch がない場合はキーごと省略**され、旧バージョンと同一のワイヤフォーマットになる。syslenz 本体は `alerts` を TUI のアラート表示 (ステータスバーのカウント、サイドバーの重要度バッジ) に合流させる
+- JSON エスケープ: `"`, `\` をエスケープする
+- **数値の健全性**: `Float`/`Duration` 値が NaN または ±Infinity のメトリクスはスナップショットから省略する (RFC 8259 に表現が存在せず、serde_json 等の厳密なパーサを壊すため)
+- **端末安全性**: ANSI エスケープシーケンスは除去し、残る制御文字 (U+0000–U+001F, U+007F) はスペースに置換する。`\uXXXX` エスケープでは JSON としては合法でも、クライアントがアンエスケープした生の制御文字が端末に到達して TUI を破壊するため
 
 #### 2.5.2 フィールド順序
 
@@ -580,7 +600,7 @@ public final class SyslenzAgent {
 #### `startServer(int port)`
 
 - ポート `port` で TCP サーバーを起動する
-- バインドアドレス: `0.0.0.0` (全インタフェース)
+- バインドアドレス: `127.0.0.1` (ループバックのみ。外部公開はオーバーロードで明示)
 - デーモンスレッドで動作し、JVM シャットダウンを妨げない
 - 冪等: 既に起動済みの場合は何もしない (double-checked locking)
 
@@ -588,7 +608,7 @@ public final class SyslenzAgent {
 
 - v1.1.1 で追加されたオーバーロード
 - `bindAddress` に `"127.0.0.1"` を指定するとループバックのみにバインドされる
-- `null` を渡した場合は `"0.0.0.0"` として扱われる
+- `null` を渡した場合は `"127.0.0.1"` として扱われる
 
 #### `stopServer()`
 
@@ -728,7 +748,7 @@ String json2 = JsonExporter.export(metrics, customMetrics);
 
 | パラメータ | 型 | デフォルト | 設定方法 |
 |----------|-----|----------|---------|
-| bindAddress | String | `"0.0.0.0"` | `startServer(port, bindAddress)` の第 2 引数 |
+| bindAddress | String | `"127.0.0.1"` | `startServer(port, bindAddress)` の第 2 引数 |
 
 - `"0.0.0.0"`: 全インタフェースでリッスン (外部からアクセス可能)
 - `"127.0.0.1"`: ループバックのみ (ローカル接続のみ許可)

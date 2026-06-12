@@ -6,6 +6,22 @@ Published to Maven Central as `org.unlaxer.infra:syslenz4j`.
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **TCP responses now use the Snapshot wire format** — `syslenz --connect` parses `{"timestamp", "entries": {...}}`, but the server sent a bare ProcEntry, so the real client could never parse it. Responses are now wrapped as `{"timestamp": <ISO 8601>, "entries": {"jvm": <ProcEntry>}}`. Stdout/plugin mode (`printSnapshot()`) still emits the bare ProcEntry.
+- **One request per connection** — the syslenz client reads responses until EOF, so keeping the connection open stalled it until its read timeout. The server now closes after responding, mirroring `syslenz --serve`. `QUIT` or an empty line also closes.
+- **NaN/Infinity metrics no longer corrupt the JSON** — `Float`/`Duration` metrics with non-finite values (e.g. a gauge dividing by zero) produced literals like `{"Float": NaN}` that strict JSON parsers reject, breaking the whole snapshot. Such metrics are now omitted.
+- **Control characters can no longer corrupt the syslenz TUI** — ANSI escape sequences in text metrics are stripped and remaining control characters are replaced with spaces. Previously they were `\uXXXX`-escaped (valid JSON), but the client unescaped them and wrote raw ESC bytes to the terminal.
+
+### Added
+
+- **Alerts in snapshots** — firing watches are exported as a top-level `alerts` array (`name`, `severity`, `value`, `message`, `condition`, `since`); the key is omitted when nothing is firing. syslenz (with the matching change) displays them in the TUI status bar and sidebar badges.
+- **`SyslenzAgent.evaluateEvery(Duration)` / `stopEvaluator()`** — self-driven watch evaluation on a daemon thread, so alerts fire even when no client is connected (previously watches were only evaluated on `SNAPSHOT` requests).
+
+---
+
 ## [1.1.1] - 2026-04-19
 
 ### Fixed

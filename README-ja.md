@@ -224,32 +224,60 @@ event.timestamp()   // Instant
 event.message()     // 人間が読めるサマリー文字列
 ```
 
+### 自己駆動評価
+
+デフォルトでは Watch の評価はクライアントが `SNAPSHOT` を要求したときにしか行われません。syslenz クライアントが接続していない間（夜間など）もアラートを発火させるには、組み込みのエバリュエータを起動します:
+
+```java
+SyslenzAgent.evaluateEvery(Duration.ofSeconds(10));  // デーモンスレッド
+SyslenzAgent.stopEvaluator();                        // 停止
+```
+
+### スナップショット内のアラート
+
+発火中の Watch は、すべてのスナップショット応答に `alerts` 配列として含まれます。`--connect` で接続した syslenz TUI のステータスバー（`[!!1 CRIT]`）と `jvm` ソースの重要度バッジに表示されます。
+
 > **既知の制限**: v1.1.0 では複合条件 `.and()` チェーンの実装が不完全です。`CompoundCondition.greaterThan()` が `null` を返すため、fluent チェーンが途中で切断され NPE のリスクがあります。二次条件で動作するのは `GREATER_THAN` と `LESS_THAN` のみです。また、`WatchRegistry.evaluate()` がスナップショット取得パスに組み込まれていないため、Watch コールバックはこのリリースでは自動発火しません。詳細は [GitHub issue #3](https://github.com/opaopa6969/syslenz4j/issues/3) を参照。
 
 ---
 
 ## プロトコル
 
-TCP サーバーは行指向のテキストプロトコルを使用します:
+TCP サーバーは行指向のテキストプロトコルを使用します（`syslenz --serve` と同じ振る舞い）:
 
 ```
 クライアント → サーバー:  SNAPSHOT\n
-サーバー → クライアント:  <ProcEntry JSON 1行>\n
+サーバー → クライアント:  <Snapshot JSON 1行>\n   (応答後にサーバーが接続をクローズ)
 ```
 
-ProcEntry JSON の構造:
+Snapshot JSON の構造（`syslenz --connect` がパースする形）:
 
 ```json
 {
-  "source": "jvm/pid-12345",
-  "fields": [
-    {"name": "heap_used", "value": {"Bytes": 524288000}, "unit": null, "description": "Current heap memory usage"},
-    {"name": "thread_count", "value": {"Integer": 42}, "unit": "count", "description": "Current live thread count"}
+  "timestamp": "2026-06-12T01:02:03.456Z",
+  "entries": {
+    "jvm": {
+      "source": "jvm/pid-12345",
+      "fields": [
+        {"name": "heap_used", "value": {"Bytes": 524288000}, "unit": null, "description": "Current heap memory usage"},
+        {"name": "thread_count", "value": {"Integer": 42}, "unit": "count", "description": "Current live thread count"}
+      ]
+    }
+  },
+  "alerts": [
+    {"name": "queue_size", "severity": "critical", "value": 250.0,
+     "message": "[critical] queue_size > 100 (value: 250.00)",
+     "condition": "> 100", "since": "2026-06-12T01:02:00Z"}
   ]
 }
 ```
 
-接続は複数リクエストにわたって維持するか、1回のやりとりでクローズすることができます。未知のコマンドはサイレントに無視されます。
+1 リクエスト 1 接続です: syslenz クライアントは応答を EOF まで読むため、サーバーは応答後に接続をクローズします（`QUIT` または空行でもクローズ）。未知のコマンドには `ERROR unknown command: ...` を返して接続をクローズします。発火中の Watch がない場合、`alerts` キーは省略されます。
+
+出力の健全性（syslenz TUI の保護）:
+
+- `Float`/`Duration` 値が NaN または ±Infinity のメトリクスは省略されます — 正しい JSON 表現が存在せず、厳密なパーサを壊すため。
+- テキスト値中の ANSI エスケープシーケンスは除去し、残る制御文字はスペースに置換します。メトリクスの内容によって端末表示が崩れることはありません。
 
 ---
 
@@ -313,7 +341,7 @@ public class SyslenzLifecycle implements SmartLifecycle {
 
 ## セキュリティ上の注意
 
-- `SyslenzServer` はデフォルトですべてのネットワークインターフェース（`0.0.0.0`）にバインドします。**このポートをパブリックインターネットに公開しないでください。** ファイアウォールで制限するか、OS レベルで `127.0.0.1` にバインドしてください。
+- `SyslenzServer` はデフォルトでループバック（`127.0.0.1`）にバインドします。他のインターフェースへ公開する場合は `startServer(port, "0.0.0.0")` のように明示してください。**その場合もパブリックインターネットには公開しないでください。**
 - TCP エンドポイントには認証がありません。ポートにアクセスできる相手は JVM の内部情報（ヒープサイズ、スレッド数、CPU 使用率、デッドロック状況）をすべて読み取れます。
 - コンテナ環境では、内部ネットワークのみにポートを公開してください（Docker の `--network internal`、Kubernetes の `ClusterIP` など）。
 

@@ -1,8 +1,9 @@
 package org.unlaxer.infra.syslenz4j;
 
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
@@ -20,11 +21,25 @@ class WatchRegistry {
         final WatchCondition condition;
         boolean wasFiring = false;
         long lastFiredAt = 0;
+        volatile double lastValue = Double.NaN;
+        volatile long firingSince = 0;
 
         WatchEntry(WatchCondition condition) {
             this.condition = condition;
         }
     }
+
+    /**
+     * 発火中のアラート（スナップショットの {@code alerts} 出力用）。
+     */
+    record ActiveAlert(
+        String name,
+        Severity severity,
+        double value,
+        String message,
+        String condition,
+        long sinceEpochMs
+    ) {}
 
     /**
      * 条件を登録する（{@link WatchCondition#register()} から呼ばれる）。
@@ -56,11 +71,14 @@ class WatchRegistry {
                 }
             }
 
+            entry.lastValue = value;
+
             if (matches && !entry.wasFiring) {
                 // 新規発火（クールダウン確認）
                 if (now - entry.lastFiredAt >= cond.cooldownMs()) {
                     entry.wasFiring = true;
                     entry.lastFiredAt = now;
+                    entry.firingSince = now;
                     if (cond.onFire() != null) {
                         try {
                             cond.onFire().accept(
@@ -92,6 +110,47 @@ class WatchRegistry {
      */
     int firingCount() {
         return (int) entries.stream().filter(e -> e.wasFiring).count();
+    }
+
+    /**
+     * 現在発火中のアラート一覧（スナップショットの {@code alerts} 出力用）。
+     */
+    List<ActiveAlert> activeAlerts() {
+        List<ActiveAlert> result = new ArrayList<>();
+        for (WatchEntry entry : entries) {
+            if (!entry.wasFiring) continue;
+            WatchCondition cond = entry.condition;
+            String condDesc = cond.describe();
+            String message = String.format("[%s] %s %s (value: %.2f)",
+                    cond.severity().label(), cond.metricName(), condDesc, entry.lastValue);
+            result.add(new ActiveAlert(
+                    cond.metricName(), cond.severity(), entry.lastValue,
+                    message, condDesc, entry.firingSince));
+        }
+        return result;
+    }
+
+    /**
+     * JVM メトリクスとカスタムメトリクスから監視評価用の値マップを作る。
+     * カスタムメトリクスは {@code app_} プレフィックス付きと無しの両方の
+     * 名前で参照できる。
+     */
+    static Map<String, Double> metricValues(List<JvmCollector.Metric> jvmMetrics,
+                                            List<JvmCollector.Metric> customMetrics) {
+        Map<String, Double> values = new HashMap<>();
+        for (JvmCollector.Metric m : jvmMetrics) {
+            if (m.value instanceof Number) {
+                values.put(m.name, ((Number) m.value).doubleValue());
+            }
+        }
+        for (JvmCollector.Metric m : customMetrics) {
+            if (m.value instanceof Number) {
+                String key = m.name.startsWith("app_") ? m.name.substring(4) : m.name;
+                values.put(m.name, ((Number) m.value).doubleValue());
+                values.put(key, ((Number) m.value).doubleValue());
+            }
+        }
+        return values;
     }
 
     /**

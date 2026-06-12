@@ -163,6 +163,24 @@ public class WatchCondition {
     Operator operator() { return operator; }
     double threshold() { return threshold; }
 
+    /**
+     * 条件の文字列表現（例: {@code "> 80"}、{@code "outside [30, 85]"}）。
+     * スナップショットの alerts 出力に使われる。
+     */
+    String describe() {
+        return switch (operator) {
+            case OUTSIDE_RANGE -> "outside [" + fmt(rangeMin) + ", " + fmt(rangeMax) + "]";
+            case INSIDE_RANGE -> "inside [" + fmt(rangeMin) + ", " + fmt(rangeMax) + "]";
+            default -> operator.symbol() + " " + fmt(threshold);
+        };
+    }
+
+    private static String fmt(double v) {
+        return v == Math.rint(v) && Double.isFinite(v)
+                ? String.valueOf((long) v)
+                : String.valueOf(v);
+    }
+
     static class CompoundCondition {
         final String metricName;
         private final WatchCondition parent;

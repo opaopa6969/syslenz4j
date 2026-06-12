@@ -224,32 +224,60 @@ event.timestamp()   // Instant
 event.message()     // human-readable summary string
 ```
 
+### Self-driven evaluation
+
+By default, watches are evaluated only when a client requests a `SNAPSHOT`. To fire alerts even while no syslenz client is connected (e.g. overnight), start the built-in evaluator:
+
+```java
+SyslenzAgent.evaluateEvery(Duration.ofSeconds(10));  // daemon thread
+SyslenzAgent.stopEvaluator();                        // stop it again
+```
+
+### Alerts in snapshots
+
+Firing watches are included in every snapshot response as an `alerts` array. A syslenz TUI connected via `--connect` shows them in its status bar (`[!!1 CRIT]`) and as severity badges on the `jvm` source.
+
 > **Known limitation**: The compound condition `.and()` chain has an incomplete implementation in v1.1.0 — the fluent chain breaks after `.and("x").greaterThan(v)` because `CompoundCondition.greaterThan()` returns `null`. Only `GREATER_THAN` and `LESS_THAN` operators work for the secondary condition. See [GitHub issue #3](https://github.com/opaopa6969/syslenz4j/issues/3). Additionally, `WatchRegistry.evaluate()` is not yet wired into the snapshot path; Watch callbacks do not fire automatically in this release.
 
 ---
 
 ## Protocol
 
-The TCP server uses a line-oriented text protocol:
+The TCP server uses a line-oriented text protocol, mirroring `syslenz --serve`:
 
 ```
 Client → Server:  SNAPSHOT\n
-Server → Client:  <single-line ProcEntry JSON>\n
+Server → Client:  <single-line Snapshot JSON>\n   (then the server closes the connection)
 ```
 
-ProcEntry JSON structure:
+Snapshot JSON structure (the shape `syslenz --connect` parses):
 
 ```json
 {
-  "source": "jvm/pid-12345",
-  "fields": [
-    {"name": "heap_used", "value": {"Bytes": 524288000}, "unit": null, "description": "Current heap memory usage"},
-    {"name": "thread_count", "value": {"Integer": 42}, "unit": "count", "description": "Current live thread count"}
+  "timestamp": "2026-06-12T01:02:03.456Z",
+  "entries": {
+    "jvm": {
+      "source": "jvm/pid-12345",
+      "fields": [
+        {"name": "heap_used", "value": {"Bytes": 524288000}, "unit": null, "description": "Current heap memory usage"},
+        {"name": "thread_count", "value": {"Integer": 42}, "unit": "count", "description": "Current live thread count"}
+      ]
+    }
+  },
+  "alerts": [
+    {"name": "queue_size", "severity": "critical", "value": 250.0,
+     "message": "[critical] queue_size > 100 (value: 250.00)",
+     "condition": "> 100", "since": "2026-06-12T01:02:00Z"}
   ]
 }
 ```
 
-The connection can be kept open for multiple requests or closed after one. Unknown commands are silently ignored.
+One request per connection: the syslenz client reads the response until EOF, so the server closes after responding (`QUIT` or an empty line also closes). Unknown commands get an `ERROR unknown command: ...` response and the connection is closed. The `alerts` key is omitted when no watch is firing.
+
+Output hygiene (protects the syslenz TUI):
+
+- Metrics whose `Float`/`Duration` value is NaN or ±Infinity are omitted — they have no valid JSON representation and would break strict parsers.
+- ANSI escape sequences in text values are stripped, and remaining control characters are replaced with spaces, so terminal output can never be corrupted by metric content.
 
 ---
 
@@ -313,7 +341,7 @@ public class SyslenzLifecycle implements SmartLifecycle {
 
 ## Security Notes
 
-- `SyslenzServer` binds to all network interfaces (`0.0.0.0`) by default. **Do not expose this port to the public internet.** Use a firewall rule or bind to `127.0.0.1` at the OS level.
+- `SyslenzServer` binds to loopback (`127.0.0.1`) by default. To expose it on other interfaces, pass an explicit bind address (`startServer(port, "0.0.0.0")`) — and **do not expose the port to the public internet**.
 - There is no authentication on the TCP endpoint. Anyone who can reach the port can read JVM internals (heap sizes, thread counts, CPU usage, deadlocks).
 - In container environments, publish the port only to internal networks (e.g. Docker `--network internal`, Kubernetes `ClusterIP`).
 

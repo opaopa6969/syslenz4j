@@ -7,9 +7,7 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketException;
 import java.net.SocketTimeoutException;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -17,12 +15,15 @@ import java.util.concurrent.TimeUnit;
 /**
  * Lightweight TCP server compatible with the {@code syslenz --connect} protocol.
  *
- * <p>Protocol:
+ * <p>Protocol (mirrors {@code syslenz --serve}):
  * <ol>
  *   <li>Client connects to the configured port.</li>
  *   <li>Client sends {@code SNAPSHOT\n}.</li>
- *   <li>Server responds with a single-line ProcEntry JSON followed by {@code \n}.</li>
- *   <li>Connection may be kept open for further requests or closed by either side.</li>
+ *   <li>Server responds with a single-line Snapshot JSON
+ *       ({@code {"timestamp": ..., "entries": {"jvm": ...}}}) followed by
+ *       {@code \n}, then closes the connection (one request per connection —
+ *       the syslenz client reads until EOF).</li>
+ *   <li>{@code QUIT} or an empty line closes the connection without a response.</li>
  * </ol>
  *
  * <p>The server runs on a single daemon thread for accepting connections.
@@ -147,12 +148,18 @@ public class SyslenzServer {
                 out.write(json.getBytes("UTF-8"));
                 out.write('\n');
                 out.flush();
+                // One request per connection: the syslenz client reads the
+                // response with read_to_string (until EOF), so keeping the
+                // connection open would stall it until its read timeout.
+                break;
+            } else if (trimmed.isEmpty() || "QUIT".equalsIgnoreCase(trimmed)) {
+                break;
             } else {
                 // Unknown command: return an error response and close the connection
                 String error = "ERROR unknown command: " + trimmed + "\n";
                 out.write(error.getBytes("UTF-8"));
                 out.flush();
-                return;
+                break;
             }
         }
     }
@@ -163,26 +170,14 @@ public class SyslenzServer {
         List<JvmCollector.Metric> customMetrics = registry.collect();
 
         // Drive WatchRegistry evaluation on each snapshot
+        List<WatchRegistry.ActiveAlert> alerts = List.of();
         if (watchRegistry != null) {
-            Map<String, Double> metricValues = new HashMap<>();
-            for (JvmCollector.Metric m : jvmMetrics) {
-                if (m.value instanceof Number) {
-                    metricValues.put(m.name, ((Number) m.value).doubleValue());
-                }
-            }
-            for (JvmCollector.Metric m : customMetrics) {
-                if (m.value instanceof Number) {
-                    // strip "app_" prefix added by MetricRegistry.collect()
-                    String key = m.name.startsWith("app_") ? m.name.substring(4) : m.name;
-                    metricValues.put(m.name, ((Number) m.value).doubleValue());
-                    metricValues.put(key, ((Number) m.value).doubleValue());
-                }
-            }
-            watchRegistry.evaluate(metricValues);
+            watchRegistry.evaluate(WatchRegistry.metricValues(jvmMetrics, customMetrics));
+            alerts = watchRegistry.activeAlerts();
         }
 
         // Ensure single-line JSON (no embedded newlines)
-        String json = JsonExporter.export(jvmMetrics, customMetrics);
+        String json = JsonExporter.exportSnapshot(jvmMetrics, customMetrics, alerts);
         return json.replace("\n", "").replace("\r", "");
     }
 }

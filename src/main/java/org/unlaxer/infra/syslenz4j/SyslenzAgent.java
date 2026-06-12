@@ -34,6 +34,7 @@ public final class SyslenzAgent {
     private static final MetricRegistry REGISTRY = new MetricRegistry();
     private static final WatchRegistry WATCHES = new WatchRegistry();
     private static volatile SyslenzServer serverInstance;
+    private static volatile java.util.concurrent.ScheduledExecutorService evaluatorInstance;
 
     private SyslenzAgent() {}
 
@@ -136,6 +137,68 @@ public final class SyslenzAgent {
      */
     static WatchRegistry watches() {
         return WATCHES;
+    }
+
+    /**
+     * 監視条件を一定間隔で自己評価する。
+     *
+     * <p>通常、Watch の評価はクライアントが {@code SNAPSHOT} を要求した
+     * タイミングでしか行われない。つまり syslenz が接続していない間は
+     * アラートが一切発火しない。このメソッドを呼ぶと、デーモンスレッドが
+     * 指定間隔でメトリクスを収集して Watch を評価するため、クライアントの
+     * 接続有無に関係なくアラートが発火する。
+     *
+     * <pre>{@code
+     * SyslenzAgent.watch("heap_used_pct").greaterThan(80.0)
+     *     .onFire(e -> log.warn(e.message())).register();
+     * SyslenzAgent.evaluateEvery(Duration.ofSeconds(10));
+     * }</pre>
+     *
+     * <p>再度呼ぶと前のスケジューラを停止して新しい間隔で起動し直す。
+     *
+     * @param interval 評価間隔（1ミリ秒以上）
+     */
+    public static void evaluateEvery(java.time.Duration interval) {
+        if (interval.toMillis() < 1) {
+            throw new IllegalArgumentException("interval must be at least 1ms: " + interval);
+        }
+        synchronized (SyslenzAgent.class) {
+            stopEvaluator();
+            java.util.concurrent.ScheduledExecutorService scheduler =
+                java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
+                    Thread t = new Thread(r, "syslenz-watch-evaluator");
+                    t.setDaemon(true);
+                    return t;
+                });
+            scheduler.scheduleAtFixedRate(SyslenzAgent::evaluateOnce,
+                    interval.toMillis(), interval.toMillis(),
+                    java.util.concurrent.TimeUnit.MILLISECONDS);
+            evaluatorInstance = scheduler;
+        }
+    }
+
+    /**
+     * {@link #evaluateEvery(java.time.Duration)} のスケジューラを停止する。
+     */
+    public static void stopEvaluator() {
+        java.util.concurrent.ScheduledExecutorService s = evaluatorInstance;
+        if (s != null) {
+            s.shutdownNow();
+            evaluatorInstance = null;
+        }
+    }
+
+    /**
+     * メトリクスを1回収集して全監視条件を評価する。
+     */
+    static void evaluateOnce() {
+        try {
+            JvmCollector collector = new JvmCollector();
+            WATCHES.evaluate(WatchRegistry.metricValues(
+                    collector.collect(), REGISTRY.collect()));
+        } catch (Exception e) {
+            // 収集の一時的な失敗でスケジューラを止めない
+        }
     }
 
     /**
