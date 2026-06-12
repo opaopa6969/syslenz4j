@@ -22,7 +22,7 @@
 <dependency>
     <groupId>org.unlaxer.infra</groupId>
     <artifactId>syslenz4j</artifactId>
-    <version>1.1.0</version>
+    <version>1.1.1</version>
 </dependency>
 ```
 
@@ -30,7 +30,7 @@
 
 ```kotlin
 dependencies {
-    implementation("org.unlaxer.infra:syslenz4j:1.1.0")
+    implementation("org.unlaxer.infra:syslenz4j:1.1.1")
 }
 ```
 
@@ -38,7 +38,7 @@ dependencies {
 
 ```groovy
 dependencies {
-    implementation 'org.unlaxer.infra:syslenz4j:1.1.0'
+    implementation 'org.unlaxer.infra:syslenz4j:1.1.1'
 }
 ```
 
@@ -135,7 +135,7 @@ SyslenzAgent.watch("thread_deadlocked")
     .register();
 ```
 
-> **注意**: v1.1.0 では、`WatchRegistry.evaluate()` がスナップショットパスに組み込まれていないため、Watch コールバックは自動発火しません。既知の問題として [GitHub #3](https://github.com/opaopa6969/syslenz4j/issues/3) で追跡中です。必要な場合は `SyslenzAgent.watches().evaluate(metricsMap)` を手動で呼び出してください。
+> **補足**: Watch の評価は `SNAPSHOT` リクエストのたびに行われます（v1.1.1 以降）。つまり syslenz クライアントがポーリングしている間はコールバックが自動発火します。クライアント未接続の間もアラートを発火させたい場合は、`SyslenzAgent.evaluateEvery(Duration.ofSeconds(10))` で自己駆動評価を起動してください（停止は `SyslenzAgent.stopEvaluator()`）。
 
 ---
 
@@ -297,4 +297,4 @@ public class App {
 
 **カスタムメトリクスが表示されない**: `registry().gauge(...)` は `startServer()` の前後どちらでも呼び出せます。カスタムメトリクスは登録時ではなく、`SNAPSHOT` リクエストごとに収集されます。
 
-**Watch コールバックが発火しない**: v1.1.0 の既知の問題です。[GitHub #3](https://github.com/opaopa6969/syslenz4j/issues/3) を参照してください。
+**Watch コールバックが発火しない**: Watch は `SNAPSHOT` リクエスト時に評価されます。`syslenz --connect` で接続中か、`SyslenzAgent.evaluateEvery(Duration)` を起動しているか確認してください。クライアント未接続かつ自己駆動評価を起動していない場合、コールバックは発火しません。

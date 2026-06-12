@@ -97,24 +97,25 @@ TCP 接続（ポート P）
 ```
 
 - サーバーは `BufferedReader.readLine()` で行を読み取り、末尾の空白を除去し、大文字小文字を区別せずに `SNAPSHOT` を照合します。
-- 未知のコマンドはサイレント無視（前方互換性: 将来のプロトコル版で新コマンドを追加可能）。
+- 1接続1リクエスト: スナップショット送信後にソケットを閉じます（syslenz クライアントは EOF まで読むため）。
+- 未知のコマンドには `ERROR unknown command: <cmd>\n` を返してから接続を閉じます。`QUIT` や空行はレスポンスなしで接続を閉じます。
 - レスポンスの JSON は送信前に内部改行を除去し、`\n` 区切りを明確に保ちます。
 - 接続タイムアウト: 30秒間の非アクティブでソケットを閉じます。
 
 ### サーバースレッドモデル
 
-`SyslenzServer` はブロッキング I/O を使用する単一の daemon スレッドで動作します:
+`SyslenzServer` は単一の daemon スレッドで接続を受け付け、accept したソケットごとにキャッシュ型ワーカースレッドプール（`Executors.newCachedThreadPool`）へ振り分けます。これにより遅い・アイドルなクライアントが他の接続をブロックしません:
 
 ```mermaid
 flowchart TB
     AL["acceptLoop（daemon スレッド）"]
     Accept["serverSocket.accept()<br/>1秒ごとに running フラグを確認"]
-    Handle["handleClient(socket)<br/>そのソケットのすべてのコマンドを処理"]
-    Read["reader.readLine() ループ<br/>EOF またはタイムアウトまで"]
-    AL --> Accept --> Handle --> Read
+    Submit["workerPool.submit(...)<br/>（接続ごとの daemon ワーカースレッド）"]
+    Handle["handleClient(socket)<br/>1リクエストを処理して閉じる"]
+    AL --> Accept --> Submit --> Handle
 ```
 
-接続は逐次処理されます。数秒ごとにポーリングする監視ツールには十分です。複数の同時接続が必要な場合は、接続ごとのスレッドプールが必要ですが、v1.1.0 では未実装です。
+接続はワーカープール上で並行処理されるため、複数の syslenz クライアントが同時接続できます。`stop()` はプールをシャットダウンし、処理中のハンドラの完了を最大5秒待ちます。
 
 ---
 
@@ -157,13 +158,13 @@ stateDiagram-v2
     FIRING --> NOT_FIRING: 成立しなくなった
 ```
 
-### 既知の問題: evaluate が接続されていない
+### 評価の接続（v1.1.1 以降）
 
-`WatchRegistry.evaluate()` は定義されていますが、**`SyslenzServer.collectSnapshot()` から呼ばれていません**。そのため、v1.1.0 では Watch コールバックは自動発火しません。修正には、スナップショット収集後にメトリクス値を `Map<String, Double>` として `WatchRegistry.evaluate()` に渡す必要があります。[GitHub issue #3](https://github.com/opaopa6969/syslenz4j/issues/3) で追跡中。
+`SyslenzServer.collectSnapshot()` は JVM・カスタムの全メトリクスから `Map<String, Double>` を構築し、`SNAPSHOT` リクエストのたびに `WatchRegistry.evaluate()` へ渡します。さらに発火中の Watch をスナップショットの `alerts` 配列として添付します。そのため、クライアントがポーリングするたびに Watch コールバックが自動発火します。クライアント未接続の間も評価したい場合は、`SyslenzAgent.evaluateEvery(Duration)` で自己駆動評価を起動してください。
 
-### 既知の問題: CompoundCondition の fluent チェーン
+### CompoundCondition の fluent チェーン（v1.1.1 以降）
 
-`CompoundCondition.greaterThan()` が `null` を返す（`WatchCondition` ではない）ため、`.and("x").greaterThan(v)` 以降のチェーンで NPE が発生します。これは v1.1.0 のドキュメント化された動作です。[GitHub issue #3](https://github.com/opaopa6969/syslenz4j/issues/3) で追跡中。
+`CompoundCondition.greaterThan()` / `lessThan()` / `greaterThanOrEqual()` / `lessThanOrEqual()` はいずれも親の `WatchCondition` を返すため、`.and("x").greaterThan(v)` はそのままビルダーへチェーンして続けられます。ただしセカンダリ条件の `evaluate()` は現状 `GREATER_THAN` と `LESS_THAN` のみ実装しており、`>=` / `<=` のオーバーロードはビルダーで受理されますが評価時には常に真として扱われます。
 
 ---
 

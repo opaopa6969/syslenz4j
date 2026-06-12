@@ -176,7 +176,9 @@ SyslenzAgent.watch("app_queue_size")
     .register();
 ```
 
-> **Known limitation (v1.1.0)**: `CompoundCondition.greaterThan()` returns `null` instead of the parent `WatchCondition`, so any method calls after `.and("x").greaterThan(v)` will throw `NullPointerException`. Only `greaterThan` and `lessThan` are supported for the secondary condition, and you must not chain further after them. Fix tracked in [GitHub #3](https://github.com/opaopa6969/syslenz4j/issues/3).
+The secondary operator methods (`greaterThan`, `lessThan`, `greaterThanOrEqual`, `lessThanOrEqual`) all return the parent `WatchCondition`, so you can keep chaining `.severity()`, `.onFire()`, `.register()`, etc. after `.and("x").greaterThan(v)`.
+
+> **Current limitation (v1.1.1)**: only `greaterThan` and `lessThan` are evaluated for the secondary condition. The `greaterThanOrEqual` / `lessThanOrEqual` overloads compile and chain correctly but are treated as always-true at evaluation time (the watch then fires based on the primary condition alone). See [GitHub #3](https://github.com/opaopa6969/syslenz4j/issues/3).
 
 ---
 
@@ -246,15 +248,18 @@ Cooldown applies only to the NOT_FIRING → FIRING transition. There is no coold
 
 ---
 
-## Known Issues (v1.1.0)
+## Evaluation Model (v1.1.1)
 
-1. **`WatchRegistry.evaluate()` is not called automatically.** The snapshot path (`SyslenzServer.collectSnapshot()`) does not invoke `evaluate()`. Watch callbacks never fire in production unless you call `evaluate()` manually. Fix planned for v1.2.0.
+Watch evaluation is now wired into the snapshot path: `SyslenzServer.collectSnapshot()` builds a metric-value map and calls `WatchRegistry.evaluate()` on every `SNAPSHOT` request, so callbacks fire automatically while a client is polling. To also fire alerts while no client is connected, start the self-driven evaluator:
 
-2. **`CompoundCondition.greaterThan()` returns `null`.** The fluent chain breaks after `.and("metric").greaterThan(v)`. Only `GREATER_THAN` and `LESS_THAN` work for the secondary condition, and you cannot chain further methods after them.
+```java
+SyslenzAgent.evaluateEvery(Duration.ofSeconds(10));  // daemon thread
+SyslenzAgent.stopEvaluator();                         // stop it again
+```
 
-3. **Secondary condition operators are incomplete.** `CompoundCondition.evaluate()` only handles `GREATER_THAN` and `LESS_THAN`; all other operators fall through to `default: true` (always passes).
+### Known limitation
 
-All three are tracked in [GitHub issue #3](https://github.com/opaopa6969/syslenz4j/issues/3).
+**Secondary condition operators are incomplete.** `CompoundCondition.evaluate()` only handles `GREATER_THAN` and `LESS_THAN`; the `>=` / `<=` overloads chain correctly but fall through to `default -> true` (always passes) at evaluation time. Tracked in [GitHub issue #3](https://github.com/opaopa6969/syslenz4j/issues/3).
 
 ---
 
@@ -272,4 +277,4 @@ SyslenzAgent.watch("app_queue_depth").greaterThan(1000).register();
 
 **Testing watch conditions**: Use `SyslenzAgent.clearWatches()` in test teardown to prevent conditions from one test affecting another.
 
-**Clearing a specific watch**: There is no per-watch deregistration in v1.1.0. Use `clearWatches()` and re-register only the conditions you want.
+**Clearing a specific watch**: There is no per-watch deregistration as of v1.1.1. Use `clearWatches()` and re-register only the conditions you want.

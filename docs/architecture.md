@@ -97,24 +97,25 @@ TCP connection on port P
 ```
 
 - The server reads lines with `BufferedReader.readLine()`, strips trailing whitespace, and matches `SNAPSHOT` case-insensitively.
-- Unknown commands are silently ignored (forward-compatible: future protocol versions can add new commands).
+- One request per connection: after sending the snapshot the server closes the socket, because the syslenz client reads until EOF.
+- Unknown commands get an `ERROR unknown command: <cmd>\n` response, then the connection is closed. `QUIT` or an empty line closes without a response.
 - The response JSON has all internal newlines stripped before sending, guaranteeing the `\n` delimiter is unambiguous.
 - Connection timeout: 30 seconds of inactivity closes the socket.
 
 ### Server Threading Model
 
-`SyslenzServer` uses a single daemon thread with blocking I/O:
+`SyslenzServer` uses a single daemon thread to accept connections; each accepted socket is dispatched to a cached worker-thread pool (`Executors.newCachedThreadPool`), so a slow or idle client cannot block other connections:
 
 ```mermaid
 flowchart TB
     AL["acceptLoop (daemon thread)"]
     Accept["serverSocket.accept()<br/>wakes up every 1 s to check running flag"]
-    Handle["handleClient(socket)<br/>processes all commands on that socket"]
-    Read["reader.readLine() loop<br/>until EOF or timeout"]
-    AL --> Accept --> Handle --> Read
+    Submit["workerPool.submit(...)<br/>(daemon worker thread per connection)"]
+    Handle["handleClient(socket)<br/>processes one request, then closes"]
+    AL --> Accept --> Submit --> Handle
 ```
 
-Connections are handled sequentially. This is adequate for monitoring tools that poll every few seconds. If multiple concurrent syslenz connections are needed, the server would need a per-connection thread pool — not implemented in v1.1.0.
+Connections are handled concurrently on the worker pool, so multiple syslenz clients can connect at once. `stop()` shuts the pool down and waits up to 5 s for in-flight handlers to finish.
 
 ---
 
@@ -155,13 +156,13 @@ stateDiagram-v2
     FIRING --> NOT_FIRING: no longer matches
 ```
 
-### Known Issue: Evaluate Not Wired
+### Evaluation Wiring (since v1.1.1)
 
-`WatchRegistry.evaluate()` is defined but **not called from `SyslenzServer.collectSnapshot()`**. This means Watch callbacks never fire in v1.1.0. The fix requires passing metric values as a `Map<String, Double>` to `WatchRegistry.evaluate()` after each snapshot collection. Tracked in [GitHub issue #3](https://github.com/opaopa6969/syslenz4j/issues/3).
+`SyslenzServer.collectSnapshot()` builds a `Map<String, Double>` from every JVM + custom metric and passes it to `WatchRegistry.evaluate()` on each `SNAPSHOT` request, then attaches the firing watches as the snapshot's `alerts` array. Watch callbacks therefore fire automatically whenever a client polls. To evaluate even while no client is connected, start the self-driven evaluator with `SyslenzAgent.evaluateEvery(Duration)`.
 
-### Known Issue: CompoundCondition Fluent Chain
+### Compound Condition Chain (since v1.1.1)
 
-`CompoundCondition.greaterThan()` returns `null` (not `WatchCondition`), so any chaining after `.and("x").greaterThan(v)` results in NPE. This is documented behavior in v1.1.0. Tracked in [GitHub issue #3](https://github.com/opaopa6969/syslenz4j/issues/3).
+`CompoundCondition.greaterThan()` / `lessThan()` / `greaterThanOrEqual()` / `lessThanOrEqual()` all return the parent `WatchCondition`, so `.and("x").greaterThan(v)` chains normally back into the builder. Note that the *secondary* condition's `evaluate()` only implements `GREATER_THAN` and `LESS_THAN`; the `>=` / `<=` overloads are accepted by the builder but currently treated as always-true at evaluation time.
 
 ---
 

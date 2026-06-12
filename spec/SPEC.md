@@ -284,7 +284,7 @@ SyslenzAgent.watch("app_queue_size")
     .register();
 ```
 
-`CompoundCondition` は `WatchCondition` の内部クラスであり、`evaluate(double value)` メソッドで独立して評価される。セカンダリ条件がサポートする演算子: `GREATER_THAN`, `LESS_THAN`, `GREATER_THAN_OR_EQUAL`, `LESS_THAN_OR_EQUAL`。その他の演算子は `default: true` にフォールスルーする (v1.1.1 時点の既知制限)。
+`CompoundCondition` は `WatchCondition` の内部クラスであり、`evaluate(double value)` メソッドで独立して評価される。ビルダーには `greaterThan`, `lessThan`, `greaterThanOrEqual`, `lessThanOrEqual` の4メソッドがあり、いずれも親の `WatchCondition` を返してチェーンを継続できる。ただし `evaluate()` が実際に処理するのは `GREATER_THAN` と `LESS_THAN` のみで、`>=` / `<=` を含むその他の演算子は `default: true` にフォールスルーする (v1.1.1 時点の既知制限)。
 
 ### 2.4 TCP サーバー (SyslenzServer)
 
@@ -305,10 +305,10 @@ syslenz `--connect` プロトコルに準拠するシンプルなテキストプ
 #### 2.4.2 実装特性
 
 - `ServerSocket` の `setSoTimeout(1000)` により `running` フラグを 1 秒ごとにチェック
-- 単一デーモンスレッド (`"syslenz-server-<port>"`) でブロッキング I/O によりクライアントを逐次処理
-- 高スループットが必要な場合はスレッドプールへのラップを推奨 (本ライブラリのスコープ外)
+- accept は単一デーモンスレッド (`"syslenz-server-<port>"`)。accept したソケットはキャッシュ型ワーカープール (`Executors.newCachedThreadPool`, スレッド名 `"syslenz-worker-<port>"`) に submit され、接続ごとに並行処理される。これにより遅い・アイドルなクライアントが他の接続をブロックしない
+- 各接続は1リクエスト処理後にクローズする (syslenz クライアントは EOF まで読むため)
 - クライアントハンドリング中の例外は `System.err` に出力するが、サーバーはクラッシュしない
-- `stop()` は `ServerSocket.close()` を呼び出し、`acceptLoop` を `SocketException` 経由で終了させる
+- `stop()` は `ServerSocket.close()` を呼び出して `acceptLoop` を `SocketException` 経由で終了させ、ワーカープールをシャットダウンして処理中ハンドラの完了を最大5秒待つ
 - `running = false` 後の `SocketException` は無視する (正常停止)
 
 #### 2.4.3 JSON 出力の正規化

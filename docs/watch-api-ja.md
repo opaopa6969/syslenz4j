@@ -176,7 +176,9 @@ SyslenzAgent.watch("app_queue_size")
     .register();
 ```
 
-> **既知の制限（v1.1.0）**: `CompoundCondition.greaterThan()` が親の `WatchCondition` ではなく `null` を返すため、`.and("x").greaterThan(v)` の後にメソッドを呼ぶと `NullPointerException` が発生します。セカンダリ条件では `greaterThan` と `lessThan` のみサポートされており、その後にメソッドをチェーンしてはいけません。[GitHub #3](https://github.com/opaopa6969/syslenz4j/issues/3) で修正追跡中。
+セカンダリ条件の演算子メソッド（`greaterThan`・`lessThan`・`greaterThanOrEqual`・`lessThanOrEqual`）はいずれも親の `WatchCondition` を返すため、`.and("x").greaterThan(v)` の後も `.severity()`・`.onFire()`・`.register()` などをそのままチェーンできます。
+
+> **現状の制限（v1.1.1）**: セカンダリ条件で実際に評価されるのは `greaterThan` と `lessThan` のみです。`greaterThanOrEqual` / `lessThanOrEqual` のオーバーロードはコンパイル・チェーンともに通りますが、評価時には常に真として扱われます（その場合、Watch はプライマリ条件のみで発火します）。詳細は [GitHub #3](https://github.com/opaopa6969/syslenz4j/issues/3)。
 
 ---
 
@@ -246,15 +248,18 @@ stateDiagram-v2
 
 ---
 
-## 既知の問題（v1.1.0）
+## 評価モデル（v1.1.1）
 
-1. **`WatchRegistry.evaluate()` が自動的に呼ばれない。** スナップショットパス（`SyslenzServer.collectSnapshot()`）が `evaluate()` を呼び出していません。手動で `evaluate()` を呼ばない限り、本番環境で Watch コールバックは発火しません。v1.2.0 での修正を予定。
+Watch の評価はスナップショットパスに組み込まれています。`SyslenzServer.collectSnapshot()` がメトリクス値マップを構築し、`SNAPSHOT` リクエストのたびに `WatchRegistry.evaluate()` を呼ぶため、クライアントがポーリングしている間はコールバックが自動発火します。クライアント未接続の間もアラートを発火させたい場合は、自己駆動の評価スケジューラを起動してください:
 
-2. **`CompoundCondition.greaterThan()` が `null` を返す。** `.and("metric").greaterThan(v)` の後に fluent チェーンが壊れます。セカンダリ条件では `GREATER_THAN` と `LESS_THAN` のみが動作し、その後さらにメソッドをチェーンできません。
+```java
+SyslenzAgent.evaluateEvery(Duration.ofSeconds(10));  // daemon スレッド
+SyslenzAgent.stopEvaluator();                         // 停止
+```
 
-3. **セカンダリ条件の演算子が不完全。** `CompoundCondition.evaluate()` は `GREATER_THAN` と `LESS_THAN` のみ処理し、他の演算子はすべて `default: true`（常に真）にフォールスルーします。
+### 現状の制限
 
-3つすべては [GitHub issue #3](https://github.com/opaopa6969/syslenz4j/issues/3) で追跡中。
+**セカンダリ条件の演算子が不完全。** `CompoundCondition.evaluate()` は `GREATER_THAN` と `LESS_THAN` のみ処理します。`>=` / `<=` のオーバーロードはチェーンこそ通りますが、評価時には `default -> true`（常に真）にフォールスルーします。[GitHub issue #3](https://github.com/opaopa6969/syslenz4j/issues/3) で追跡中。
 
 ---
 
@@ -272,4 +277,4 @@ SyslenzAgent.watch("app_queue_depth").greaterThan(1000).register();
 
 **Watch 条件のテスト**: テストのティアダウンで `SyslenzAgent.clearWatches()` を呼び、あるテストの条件が別のテストに影響しないようにしてください。
 
-**特定の Watch の削除**: v1.1.0 では Watch ごとの登録解除はできません。`clearWatches()` で全クリアしてから必要な条件のみ再登録してください。
+**特定の Watch の削除**: v1.1.1 時点では Watch ごとの登録解除はできません。`clearWatches()` で全クリアしてから必要な条件のみ再登録してください。
