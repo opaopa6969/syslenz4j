@@ -25,7 +25,7 @@ import java.util.function.Supplier;
  * reg.counter("requests_total", requestCounter::get);
  *
  * // Text: a descriptive label
- * reg.text("app_version", () -> "2.3.1");
+ * reg.text("version", () -> "2.3.1");
  * }</pre>
  *
  * <p>Thread-safe: metrics can be registered from any thread at any time.
@@ -100,7 +100,7 @@ public class MetricRegistry {
     /**
      * Register a text metric (labels, versions, etc.).
      *
-     * @param name        metric name (e.g. "app_version")
+     * @param name        metric name (e.g. "version")
      * @param supplier    supplies the current text value
      */
     public void text(String name, StringSupplier supplier) {

@@ -265,7 +265,7 @@ SyslenzAgent.stopEvaluator();                         // stop it again
 
 ## Tips
 
-**Naming custom metrics for watches**: Register the metric with a descriptive name and watch it without the `app_` prefix — the prefix is added internally by `MetricRegistry`.
+**Naming custom metrics for watches**: Register the metric with a descriptive name. Watches accept either the registered name or the generated `app_`-prefixed name.
 
 ```java
 // Register:

@@ -37,9 +37,9 @@ public class MyApp {
         SyslenzAgent.registry().gauge("queue_size", () -> myQueue.size());
         SyslenzAgent.registry().counter("requests_total", requestCounter::get);
 
-        // ヒープ使用率 80% 超でアラート
-        SyslenzAgent.watch("heap_used_pct")
-            .greaterThan(80.0)
+        // ヒープ使用量 1 GiB 超でアラート
+        SyslenzAgent.watch("heap_used")
+            .greaterThan(1_073_741_824L)
             .severity(Severity.WARNING)
             .cooldown(30_000)
             .onFire(event -> log.warn("Heap high: {}", event.message()))
@@ -67,14 +67,14 @@ syslenz --connect localhost:9100
 <dependency>
     <groupId>org.unlaxer.infra</groupId>
     <artifactId>syslenz4j</artifactId>
-    <version>1.1.0</version>
+    <version>1.1.1</version>
 </dependency>
 ```
 
 ### Gradle
 
 ```kotlin
-implementation("org.unlaxer.infra:syslenz4j:1.1.0")
+implementation("org.unlaxer.infra:syslenz4j:1.1.1")
 ```
 
 ### ソースからビルド
@@ -156,7 +156,10 @@ Fluent 条件ビルダー。メトリクスが閾値を超えた/回復した際
 | `classes_unloaded` | Integer | ClassLoadingMXBean | 起動以来のアンロードクラス数 |
 | `buffer_direct_used` | Bytes | BufferPoolMXBean | ダイレクトバッファメモリ |
 | `buffer_direct_capacity` | Bytes | BufferPoolMXBean | ダイレクトバッファ容量 |
+| `buffer_direct_count` | Integer | BufferPoolMXBean | ダイレクトバッファ数 |
 | `buffer_mapped_used` | Bytes | BufferPoolMXBean | メモリマップドバッファメモリ |
+| `buffer_mapped_capacity` | Bytes | BufferPoolMXBean | メモリマップドバッファ容量 |
+| `buffer_mapped_count` | Integer | BufferPoolMXBean | メモリマップドバッファ数 |
 
 `MetricRegistry` で登録したカスタムメトリクスは `app_` プレフィックスが付きます（例: `app_queue_size`）。
 
@@ -237,7 +240,7 @@ SyslenzAgent.stopEvaluator();                        // 停止
 
 発火中の Watch は、すべてのスナップショット応答に `alerts` 配列として含まれます。`--connect` で接続した syslenz TUI のステータスバー（`[!!1 CRIT]`）と `jvm` ソースの重要度バッジに表示されます。
 
-> **既知の制限**: v1.1.0 では複合条件 `.and()` チェーンの実装が不完全です。`CompoundCondition.greaterThan()` が `null` を返すため、fluent チェーンが途中で切断され NPE のリスクがあります。二次条件で動作するのは `GREATER_THAN` と `LESS_THAN` のみです。また、`WatchRegistry.evaluate()` がスナップショット取得パスに組み込まれていないため、Watch コールバックはこのリリースでは自動発火しません。詳細は [GitHub issue #3](https://github.com/opaopa6969/syslenz4j/issues/3) を参照。
+> **複合条件についての注記（v1.1.1）**: `.and()` の fluent チェーンは正常に動作します。`CompoundCondition` の `greaterThan()` / `lessThan()` / `greaterThanOrEqual()` / `lessThanOrEqual()` はいずれも親の `WatchCondition` を返すため、チェーンは途切れません。ただし*二次*メトリクスの評価で実際に効くのは現状 `greaterThan` / `lessThan` のみで、二次条件の `greaterThanOrEqual` / `lessThanOrEqual` はビルダー上は受理されるものの評価時には常に真として扱われます。Watch コールバックは自動発火するようになりました: `WatchRegistry.evaluate()` が `SNAPSHOT` パスに組み込まれており、スナップショット要求のたびに全 Watch が評価されます（クライアント未接続時にも評価したい場合は `evaluateEvery(Duration)` を使用）。
 
 ---
 

@@ -4,8 +4,8 @@ package org.unlaxer.infra.syslenz4j;
  * アラートの重要度。syslenz 本体の severity と対応。
  *
  * <pre>{@code
- * SyslenzAgent.watch("heap_used_pct")
- *     .greaterThan(90.0)
+ * SyslenzAgent.watch("heap_used")
+ *     .greaterThan(1_073_741_824L)
  *     .severity(Severity.CRITICAL)  // 即座にアクション必要
  *     .register();
  * }</pre>

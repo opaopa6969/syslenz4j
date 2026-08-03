@@ -20,8 +20,8 @@ package org.unlaxer.infra.syslenz4j;
  *
  * <h3>Watch API（監視条件）</h3>
  * <pre>{@code
- * SyslenzAgent.watch("heap_used_pct")
- *     .greaterThan(80.0)
+ * SyslenzAgent.watch("heap_used")
+ *     .greaterThan(1_073_741_824L)
  *     .severity(Severity.WARNING)
  *     .cooldown(30_000)
  *     .onFire(event -> logger.warn("Heap high: {}", event.value()))
@@ -104,8 +104,8 @@ public final class SyslenzAgent {
      * メトリクスの監視条件を fluent API で構築する。
      *
      * <pre>{@code
-     * SyslenzAgent.watch("heap_used_pct")
-     *     .greaterThan(80.0)
+ * SyslenzAgent.watch("heap_used")
+ *     .greaterThan(1_073_741_824L)
      *     .severity(Severity.WARNING)
      *     .onFire(event -> alert(event.message()))
      *     .register();
@@ -149,7 +149,7 @@ public final class SyslenzAgent {
      * 接続有無に関係なくアラートが発火する。
      *
      * <pre>{@code
-     * SyslenzAgent.watch("heap_used_pct").greaterThan(80.0)
+ * SyslenzAgent.watch("heap_used").greaterThan(1_073_741_824L)
      *     .onFire(e -> log.warn(e.message())).register();
      * SyslenzAgent.evaluateEvery(Duration.ofSeconds(10));
      * }</pre>

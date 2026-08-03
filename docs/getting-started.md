@@ -22,7 +22,7 @@ This guide walks you through adding syslenz4j to a Java project, connecting it t
 <dependency>
     <groupId>org.unlaxer.infra</groupId>
     <artifactId>syslenz4j</artifactId>
-    <version>1.1.0</version>
+    <version>1.1.1</version>
 </dependency>
 ```
 
@@ -30,7 +30,7 @@ This guide walks you through adding syslenz4j to a Java project, connecting it t
 
 ```kotlin
 dependencies {
-    implementation("org.unlaxer.infra:syslenz4j:1.1.0")
+    implementation("org.unlaxer.infra:syslenz4j:1.1.1")
 }
 ```
 
@@ -38,7 +38,7 @@ dependencies {
 
 ```groovy
 dependencies {
-    implementation 'org.unlaxer.infra:syslenz4j:1.1.0'
+    implementation 'org.unlaxer.infra:syslenz4j:1.1.1'
 }
 ```
 
@@ -94,7 +94,7 @@ SyslenzAgent.registry().counter("requests_total", requestCounter::get);
 SyslenzAgent.registry().counter("errors_total", errorCounter::get);
 
 // Text — labels, version strings, environment markers
-SyslenzAgent.registry().text("app_version", () -> "2.3.1");
+SyslenzAgent.registry().text("version", () -> "2.3.1");
 SyslenzAgent.registry().text("environment", () -> System.getenv("APP_ENV"));
 ```
 
@@ -135,7 +135,7 @@ SyslenzAgent.watch("thread_deadlocked")
     .register();
 ```
 
-> **Note**: Watch callbacks do not fire automatically in v1.1.0 because `WatchRegistry.evaluate()` is not yet wired into the snapshot path. This is a known issue tracked in [GitHub #3](https://github.com/opaopa6969/syslenz4j/issues/3). In the meantime, call `SyslenzAgent.watches().evaluate(metricsMap)` manually if needed.
+> **Note (v1.1.1)**: Watch callbacks fire automatically — `WatchRegistry.evaluate()` is wired into the snapshot path, so every `SNAPSHOT` request evaluates all registered watches. To evaluate even while no client is connected, start the self-driven evaluator with `SyslenzAgent.evaluateEvery(Duration.ofSeconds(10))`.
 
 ---
 
@@ -304,4 +304,4 @@ public class App {
 
 **No custom metrics visible**: Ensure `registry().gauge(...)` is called after or before `startServer()` — both work. Custom metrics are collected on each `SNAPSHOT` request, not at registration time.
 
-**Watch callbacks not firing**: This is a known issue in v1.1.0. See [GitHub #3](https://github.com/opaopa6969/syslenz4j/issues/3).
+**Watch callbacks not firing**: Watches are evaluated on each `SNAPSHOT` request, so callbacks only fire while a client is polling. To fire alerts with no client connected, start the self-driven evaluator: `SyslenzAgent.evaluateEvery(Duration.ofSeconds(10))`.

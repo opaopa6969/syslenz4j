@@ -265,13 +265,13 @@ SyslenzAgent.stopEvaluator();                         // 停止
 
 ## Tips
 
-**Watch 用のカスタムメトリクスの命名**: メトリクスを分かりやすい名前で登録し、Watch では `app_` プレフィックス付きで指定します（プレフィックスは `MetricRegistry` が内部で付与します）。
+**Watch 用のカスタムメトリクスの命名**: メトリクスを分かりやすい名前で登録します。Watch では登録名と、`MetricRegistry` が生成する `app_` プレフィックス付きの名前のどちらも指定できます。
 
 ```java
 // 登録:
 SyslenzAgent.registry().gauge("queue_depth", () -> q.size());
 
-// Watch（app_ プレフィックス付きで指定）:
+// Watch（どちらの名前でも指定可能）:
 SyslenzAgent.watch("app_queue_depth").greaterThan(1000).register();
 ```
 

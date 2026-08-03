@@ -187,8 +187,8 @@ reg.counter("requests_total", counter::get);
 reg.counter("requests_total", counter::get, "Total HTTP requests processed");
 
 // テキスト: バージョン文字列やラベル
-reg.text("app_version", () -> "2.3.1");
-reg.text("app_version", () -> "2.3.1", "Application version string");
+reg.text("version", () -> "2.3.1");
+reg.text("version", () -> "2.3.1", "Application version string");
 
 // 削除
 reg.remove("queue_depth");
@@ -594,6 +594,8 @@ public final class SyslenzAgent {
     // Watch API
     public static WatchCondition watch(String metricName)
     public static void clearWatches()
+    public static void evaluateEvery(java.time.Duration interval)
+    public static void stopEvaluator()
 }
 ```
 
@@ -635,6 +637,13 @@ public final class SyslenzAgent {
 
 - 全 `WatchCondition` の登録をクリアする
 - テスト間の状態汚染を防ぐためのテスト teardown 用 API
+
+#### `evaluateEvery(Duration interval)` / `stopEvaluator()`
+
+- `evaluateEvery` は指定間隔（1 ms 以上）で JVM・カスタムメトリクスを収集し、Watch を自己評価するデーモンスレッドを起動する
+- `evaluateEvery` を再度呼ぶと、既存のスケジューラを停止して指定間隔で再起動する
+- `stopEvaluator` は自己評価スケジューラを停止する
+- サーバーの `SNAPSHOT` パスでの評価とは独立しており、クライアント未接続時にも評価できる
 
 ### 6.2 MetricRegistry (Public API)
 
@@ -709,7 +718,7 @@ type ProcEntry = {
 ```
 
 **接続管理:**
-- 1 接続につき複数回 `SNAPSHOT\n` を送信できる
+- 1 接続につき `SNAPSHOT\n` は1回だけ送信する。レスポンス後、サーバーは接続を閉じる
 - サーバーは `SO_TIMEOUT = 30_000ms` で非アクティブ接続を切断する
 - クライアント側から接続を閉じることも可能
 
@@ -937,7 +946,7 @@ JUnit 5 (Jupiter) のみ使用。外部モックライブラリ (Mockito 等) �
 | テスト名 | 検証内容 |
 |---------|---------|
 | `startServerWithLocalhostBindAddressAcceptsConnections` | `127.0.0.1` バインドで接続でき、`SNAPSHOT` コマンドに正しいレスポンスが返ること |
-| `startServerDefaultBindsToAllInterfaces` | デフォルト (`startServer(port)`) でも `127.0.0.1` 経由で接続できること |
+| `startServerDefaultBindsToLoopback` | デフォルト (`startServer(port)`) が `127.0.0.1` にバインドされ、そこから接続できること |
 | `startServerIdempotentWithBindAddress` | 同じポートで 2 回呼んでも例外が発生しないこと (冪等性) |
 
 ### 11.4 テスト設計原則
@@ -1009,7 +1018,7 @@ implementation 'org.unlaxer.infra:syslenz4j:1.1.1'
 
 ```java
 // アプリケーション起動時に一度呼ぶ
-SyslenzAgent.startServer(9100);  // 0.0.0.0:9100 でリッスン
+SyslenzAgent.startServer(9100);  // 127.0.0.1:9100 でリッスン
 
 // localhost のみに制限する場合
 SyslenzAgent.startServer(9100, "127.0.0.1");
@@ -1105,7 +1114,7 @@ public class MetricsExporter {
 
 ### 12.6 セキュリティ考慮事項
 
-- デフォルトの `0.0.0.0` バインドでは外部ネットワークからアクセス可能。本番環境では `127.0.0.1` にバインドするか、ファイアウォールで保護することを推奨
+- デフォルトの `127.0.0.1` バインドではローカル接続のみ許可される。外部公開が必要な場合は `startServer(port, bindAddress)` で明示し、ファイアウォールで保護することを推奨
 - syslenz4j の TCP サーバーには認証機能がない。信頼できるネットワーク (VPC 内、ループバック) での使用を前提とする
 - JVM メトリクスにはシステム情報 (PID 等) が含まれる
 
@@ -1185,7 +1194,7 @@ flowchart TD
 flowchart TD
     subgraph MT["Main Thread (application)"]
         MT1[SyslenzAgent.startServer 9100]
-        MT2["synchronized SyslenzAgent.class<br/>new SyslenzServer(9100, 0.0.0.0, ...)<br/>server.start()<br/>serverInstance = server"]
+        MT2["synchronized SyslenzAgent.class<br/>new SyslenzServer(9100, 127.0.0.1, ...)<br/>server.start()<br/>serverInstance = server"]
         MT1 --> MT2
     end
 
@@ -1628,11 +1637,11 @@ watchRegistry.evaluate(metricValues);
 
 #### Fix 3: startServer(port, bindAddress) オーバーロードの追加
 
-**要求:** ループバックのみにバインドするオプションが必要。デフォルト `0.0.0.0` では外部ネットワークに公開される。
+**背景:** ループバックのみにバインドするオプションが必要だった。旧実装のデフォルト `0.0.0.0` では外部ネットワークに公開されていた。
 
 **修正:** `startServer(int port, String bindAddress)` オーバーロードを追加。`SyslenzServer` コンストラクタも対応するオーバーロードに更新。
 
-**後方互換性:** `startServer(int port)` は変更なし (バインドアドレス `"0.0.0.0"`)。
+**現在の実装:** `startServer(int port)` のデフォルトは `"127.0.0.1"`。外部公開は `startServer(int port, String bindAddress)` で明示する。
 
 ### E.2 v1.1.0 (2026-04-17) — Watch API 追加
 

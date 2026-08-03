@@ -4,8 +4,8 @@ package org.unlaxer.infra.syslenz4j;
  * 比較演算子。監視条件で使用する。
  *
  * <pre>{@code
- * SyslenzAgent.watch("heap_used_pct")
- *     .greaterThan(80.0)  // Operator.GREATER_THAN が使われる
+ * SyslenzAgent.watch("heap_used")
+ *     .greaterThan(1_073_741_824L)  // Operator.GREATER_THAN が使われる
  *     .register();
  * }</pre>
  */

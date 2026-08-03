@@ -93,7 +93,7 @@ The `source` field is resolved once per snapshot using `ProcessHandle.current().
 TCP connection on port P
   Client → "SNAPSHOT\n"
   Server → "<single-line JSON>\n"
-  (loop or close)
+  (close after the response)
 ```
 
 - The server reads lines with `BufferedReader.readLine()`, strips trailing whitespace, and matches `SNAPSHOT` case-insensitively.

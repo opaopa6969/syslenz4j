@@ -94,7 +94,7 @@ SyslenzAgent.registry().counter("requests_total", requestCounter::get);
 SyslenzAgent.registry().counter("errors_total", errorCounter::get);
 
 // テキスト — ラベル・バージョン文字列・環境マーカー
-SyslenzAgent.registry().text("app_version", () -> "2.3.1");
+SyslenzAgent.registry().text("version", () -> "2.3.1");
 SyslenzAgent.registry().text("environment", () -> System.getenv("APP_ENV"));
 ```
 

@@ -7,8 +7,8 @@ import java.util.function.Consumer;
  *
  * <h3>使い方</h3>
  * <pre>{@code
- * SyslenzAgent.watch("heap_used_pct")
- *     .greaterThan(80.0)
+ * SyslenzAgent.watch("heap_used")
+ *     .greaterThan(1_073_741_824L)
  *     .severity(Severity.WARNING)
  *     .cooldown(30_000)  // 30秒間再発火しない
  *     .onFire(event -> logger.warn("Heap high: {}%", event.value()))

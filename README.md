@@ -37,9 +37,9 @@ public class MyApp {
         SyslenzAgent.registry().gauge("queue_size", () -> myQueue.size());
         SyslenzAgent.registry().counter("requests_total", requestCounter::get);
 
-        // Alert when heap exceeds 80%
-        SyslenzAgent.watch("heap_used_pct")
-            .greaterThan(80.0)
+        // Alert when heap usage exceeds 1 GiB
+        SyslenzAgent.watch("heap_used")
+            .greaterThan(1_073_741_824L)
             .severity(Severity.WARNING)
             .cooldown(30_000)
             .onFire(event -> log.warn("Heap high: {}", event.message()))
@@ -67,14 +67,14 @@ syslenz --connect localhost:9100
 <dependency>
     <groupId>org.unlaxer.infra</groupId>
     <artifactId>syslenz4j</artifactId>
-    <version>1.1.0</version>
+    <version>1.1.1</version>
 </dependency>
 ```
 
 ### Gradle
 
 ```kotlin
-implementation("org.unlaxer.infra:syslenz4j:1.1.0")
+implementation("org.unlaxer.infra:syslenz4j:1.1.1")
 ```
 
 ### Build from Source
@@ -156,7 +156,10 @@ All metrics are collected on each `SNAPSHOT` request.
 | `classes_unloaded` | Integer | ClassLoadingMXBean | Total classes unloaded since start |
 | `buffer_direct_used` | Bytes | BufferPoolMXBean | Direct buffer memory |
 | `buffer_direct_capacity` | Bytes | BufferPoolMXBean | Direct buffer capacity |
+| `buffer_direct_count` | Integer | BufferPoolMXBean | Number of direct buffers |
 | `buffer_mapped_used` | Bytes | BufferPoolMXBean | Memory-mapped buffer memory |
+| `buffer_mapped_capacity` | Bytes | BufferPoolMXBean | Memory-mapped buffer capacity |
+| `buffer_mapped_count` | Integer | BufferPoolMXBean | Number of memory-mapped buffers |
 
 Custom metrics registered via `MetricRegistry` are prefixed `app_` (e.g. `app_queue_size`).
 
@@ -237,7 +240,7 @@ SyslenzAgent.stopEvaluator();                        // stop it again
 
 Firing watches are included in every snapshot response as an `alerts` array. A syslenz TUI connected via `--connect` shows them in its status bar (`[!!1 CRIT]`) and as severity badges on the `jvm` source.
 
-> **Known limitation**: The compound condition `.and()` chain has an incomplete implementation in v1.1.0 — the fluent chain breaks after `.and("x").greaterThan(v)` because `CompoundCondition.greaterThan()` returns `null`. Only `GREATER_THAN` and `LESS_THAN` operators work for the secondary condition. See [GitHub issue #3](https://github.com/opaopa6969/syslenz4j/issues/3). Additionally, `WatchRegistry.evaluate()` is not yet wired into the snapshot path; Watch callbacks do not fire automatically in this release.
+> **Note on compound conditions (v1.1.1)**: The `.and()` fluent chain works — `CompoundCondition.greaterThan()` / `lessThan()` / `greaterThanOrEqual()` / `lessThanOrEqual()` all return the parent `WatchCondition`, so the chain continues normally. However, evaluation of the *secondary* metric currently only applies `greaterThan` / `lessThan`; the `greaterThanOrEqual` / `lessThanOrEqual` overloads on the secondary condition are accepted by the builder but treated as always-true at evaluation time. Watch callbacks now fire automatically: `WatchRegistry.evaluate()` is wired into the `SNAPSHOT` path, so every snapshot request evaluates all watches (use `evaluateEvery(Duration)` to also evaluate while no client is connected).
 
 ---
 

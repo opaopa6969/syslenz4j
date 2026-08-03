@@ -1,4 +1,4 @@
 Manifest-Version: 1.0
-Implementation-Title: syslenz-java
-Implementation-Version: 1.0.0
+Implementation-Title: syslenz4j
+Implementation-Version: 1.1.1
 Implementation-Vendor: syslenz
