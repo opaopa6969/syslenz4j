@@ -28,7 +28,7 @@ Published to Maven Central as `org.unlaxer.infra:syslenz4j`.
 
 - **`CompoundCondition.greaterThan()` returned `null`** — broke the fluent chain after `.and(metric)`. Now returns the parent `WatchCondition` so the chain continues normally. Also added `lessThan`, `greaterThanOrEqual`, `lessThanOrEqual` overloads to `CompoundCondition` for completeness.
 - **`WatchRegistry.evaluate()` was dead code** — `SyslenzServer.collectSnapshot()` now builds a metric-value map from every JVM + custom metric snapshot and passes it to `WatchRegistry.evaluate()`. Watch callbacks fire automatically on every `SNAPSHOT` request.
-- **`SyslenzAgent.startServer(port, String bindAddress)` overload added** — allows binding to `127.0.0.1` for localhost-only exposure. The existing `startServer(port)` is unchanged and still binds to `0.0.0.0`.
+- **`SyslenzAgent.startServer(port, String bindAddress)` overload added** — allows binding to an explicit address. The existing `startServer(port)` now binds to `127.0.0.1` (loopback only) by default, instead of `0.0.0.0`.
 
 ---
 

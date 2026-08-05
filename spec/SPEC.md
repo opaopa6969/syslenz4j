@@ -916,6 +916,10 @@ JUnit 5 (Jupiter) のみ使用。外部モックライブラリ (Mockito 等) �
 | `WatchRegistryEvaluateTest` | `WatchRegistry.evaluate()` の正常動作 | v1.1.1 |
 | `CompoundConditionChainTest` | `CompoundCondition` fluent チェーンのバグ修正確認 | v1.1.1 |
 | `LocalhostBindingTest` | `startServer(port, bindAddress)` オーバーロード | v1.1.1 |
+| `SnapshotProtocolTest` | Snapshot wire format / TCP 応答形式・alerts セクション・自己駆動評価器 | v1.1.1 |
+| `WatchConditionOperatorsTest` | 各 Operator の閾値評価・WatchEvent 形式・クールダウン | v1.1.1 |
+| `MetricRegistryTest` | カスタムメトリクス登録・収集・`app_` プレフィックス・例外処理 | v1.1.1 |
+| `JsonExporterTest` | JSON 出力フォーマット・NaN/Infinity 除去・制御文字サニタイズ | v1.1.1 |
 
 ### 11.3 テストケース詳細
 
@@ -948,6 +952,74 @@ JUnit 5 (Jupiter) のみ使用。外部モックライブラリ (Mockito 等) �
 | `startServerWithLocalhostBindAddressAcceptsConnections` | `127.0.0.1` バインドで接続でき、`SNAPSHOT` コマンドに正しいレスポンスが返ること |
 | `startServerDefaultBindsToLoopback` | デフォルト (`startServer(port)`) が `127.0.0.1` にバインドされ、そこから接続できること |
 | `startServerIdempotentWithBindAddress` | 同じポートで 2 回呼んでも例外が発生しないこと (冪等性) |
+
+#### SnapshotProtocolTest
+
+**目的:** syslenz `--connect` が解析する Snapshot wire format と TCP 応答形式を保護し、v1.1.1 で追加された alerts セクションと自己駆動評価器 (`evaluateEvery`) の動作を検証する。
+
+| テスト名 | 検証内容 |
+|---------|---------|
+| `snapshotWrapsEntriesUnderJvmKey` | `exportSnapshot` が `{"timestamp", "entries": {"jvm": {...}}}` 構造を持ち、`source` が `jvm/pid-` で始まること |
+| `timestampIsIso8601WithTrailingZ` | `timestamp` が ISO 8601 形式で末尾 `Z` を持つこと |
+| `alertsKeyOmittedWhenNoWatchIsFiring` | 発火中の watch がない場合、JSON に `alerts` キーが含まれないこと |
+| `firingWatchAppearsInAlerts` | 発火した watch が `alerts` 配列に `name`/`severity`/`value`/`condition`/`since` を持つこと |
+| `resolvedWatchDisappearsFromAlerts` | 閾値を下回ると `activeAlerts()` から消えること |
+| `rangeConditionDescriptionIsReadable` | `outsideRange` の条件説明が `outside [min, max]` 形式になること |
+| `evaluateEveryFiresWatchWithoutAnyClient` | `evaluateEvery` でクライアント接続なしでも watch が発火すること |
+| `evaluateEveryRejectsZeroInterval` | `evaluateEvery(Duration.ZERO)` が `IllegalArgumentException` を投げること |
+
+#### WatchConditionOperatorsTest
+
+**目的:** `WatchRegistryEvaluateTest` が `greaterThan` の基本パスのみを対象とするのに対し、残りの Operator と付随機能を網羅する。
+
+| テスト名 | 検証内容 |
+|---------|---------|
+| `equalToFiresWhenValueMatchesExactly` | `equalTo` が値と閾値一致時に発火すること |
+| `equalToDoesNotFireWhenValueDiffers` | 値が異なる場合に発火しないこと |
+| `equalToUsesEpsilonForFloatingPoint` | 浮動小数点の epsilon 範囲内を一致とみなすこと |
+| `notEqualToFiresWhenValueDiffers` | `notEqualTo` が値不一致時に発火すること |
+| `notEqualToDoesNotFireWhenValuesMatch` | 値一致時に発火しないこと |
+| `outsideRangeFiresWhenValueBelowMin` / `...AboveMax` / `...InsideBounds` | `outsideRange` の下限・上限超過・範囲内の各ケース |
+| `insideRangeFiresWhenValueIsWithinBounds` / `...IncludesBoundaries` / `...Outside` | `insideRange` の範囲内・境界含む・範囲外の各ケース |
+| `greaterThanOrEqualFiresAtExactThreshold` / `lessThanOrEqualFiresAtExactThreshold` | `>=`/`<=` が閾値ちょうどで発火すること |
+| `firingEventHasCorrectMessageFormat` / `resolvedEventHasCorrectMessageFormat` | `WatchEvent.message()` が `[warning] metric = value` / `[RESOLVED] metric = value` 形式であること |
+| `severityLabelsAreCorrect` | `Severity.INFO/WARNING/CRITICAL` の `label()` が `info`/`warning`/`critical` であること |
+| `cooldownPreventsRefire` | クールダウン窓内の再発火が抑制されること |
+| `zeroCooldownAllowsRefireAfterResolve` | クールダウン 0 で解決後に再発火できること |
+| `missingMetricKeyIsSkippedGracefully` | 未登録メトリクスの watch が例外なくスキップされること |
+| `firingEventContainsAllExpectedFields` | `WatchEvent` が `metricName`/`value`/`severity`/`state`/`timestamp`/`message` を持つこと |
+| `defaultSeverityIsWarning` | severity 未指定時のデフォルトが `WARNING` であること |
+
+#### MetricRegistryTest
+
+**目的:** `MetricRegistry` の登録・型推論・`app_` プレフィックス付与・supplier 例外処理を検証する。
+
+| テスト名 | 検証内容 |
+|---------|---------|
+| `gaugeWithDoubleValueProducesFloatMetric` | double 値の gauge が `Float` 型の `app_` プレフィックス付きメトリクスになること |
+| `gaugeWithLongValueProducesIntegerMetric` | long 値が `Integer` 型・unit `count` になること |
+| `gaugeWithIntegerValueProducesIntegerMetric` | int 値が `Integer` 型になること |
+| `gaugeWithAtomicLongValueProducesIntegerMetric` | `AtomicLong::get` が `Integer` 型になること |
+| `counterMetricHasAppPrefix` | counter が `app_` プレフィックスを持つこと |
+| `textMetricProducesTextType` / `textMetricWithDescriptionStoresDescription` | text メトリクスが `Text` 型・説明を保持すること |
+| `removeDropsMetricFromCollect` | `remove()` 後に `collect()` から消えること |
+| `registeringSameNameOverwritesPreviousValue` | 同名再登録が上書きになり、重複が 1 件になること |
+| `supplierThrowingExceptionIsSkippedSilently` | supplier が例外を投げたメトリクスはスキップされ、他は収集されること |
+
+#### JsonExporterTest
+
+**目的:** `JsonExporter` 出力が RFC 8259 に適合し (NaN/Infinity リテラルを含まない)、制御文字がターミナル安全にサニタイズされることを検証する。
+
+| テスト名 | 検証内容 |
+|---------|---------|
+| `nanFloatMetricIsOmitted` | `Float` 型の NaN 値が出力から除外されること |
+| `infiniteFloatMetricIsOmitted` | `Float` 型の ±Infinity 値が除外されること |
+| `nanDurationMetricIsOmitted` | `Duration` 型の NaN 値が除外されること |
+| `finiteFloatMetricIsKept` | 有限値は `{"Float": 0.75}` として残ること |
+| `omittedMetricDoesNotLeaveDanglingComma` | 除外されたメトリクスがカンマの不整合を残さないこと |
+| `ansiColorSequenceIsStrippedFromTextValue` | ANSI エスケープが Text 値から取り除かれること |
+| `bareControlCharactersBecomeSpaces` | 生の制御文字 (LF/TAB/BEL/DEL) が空白に置換されること |
+| `quotesAndBackslashesAreStillEscaped` | `"` と `\` が正しくエスケープされること |
 
 ### 11.4 テスト設計原則
 
@@ -1239,7 +1311,7 @@ flowchart TD
     DT6 -.->|calls| HC1
 ```
 
-クライアント接続は逐次処理 (sequential)。複数の syslenz インスタンスが同じポートに同時接続した場合、後続接続は前の接続が完了するまで accept されない。通常の監視ユースケース (syslenz が 10–60 秒ごとにポーリング) では問題にならない。
+クライアント接続はワーカープールで並行処理される (concurrent)。accept したソケットごとに `Executors.newCachedThreadPool` のワーカースレッドが割り当てられ、遅い・アイドルなクライアントが他の接続をブロックすることはない。通常の監視ユースケース (syslenz が 10–60 秒ごとにポーリング) では実質的に単一接続だが、複数クライアントの同時接続にも対応できる。
 
 ### A.4 Watch API の内部データ構造
 
