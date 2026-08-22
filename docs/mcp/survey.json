@@ -1,0 +1,89 @@
+{
+  "repo": "syslenz4j",
+  "surveyed_at": "2026-08-22T00:00:00Z",
+  "kind": "library",
+  "summary": "JVM メトリクス（MXBean 経由）を収集し、syslenz --connect 互換の TCP ポートで公開する Java ライブラリ。組込先 JVM プロセス内で動作し、カスタムメトリクス登録と閾値アラート（Watch API）を提供する。Maven Central 公開済み、外部依存ゼロ。",
+  "decision": "skill-only",
+  "decision_reason": "syslenz4j はライブラリであり、全機能が組込先 JVM プロセス内で動作する。エージェントが MCP tool として外部から呼べる操作（JVM を起動せずにメトリクスを取る、など）は存在しない。TCP サーバは既にあるが、それは組込先アプリのライフサイクルに紐づくもので、独立した MCP バックエンドとして立てるものではない。syslenz 本体（catalog に既存）が --connect でメトリクスを収集する役割を担っており、syslenz4j 側に追加の MCP エントリポイントを作る意義は薄い。ただし、組込手順・メトリクス一覧・Watch API の使い方・プロトコル仕様は skill/resource として配る価値があり、エージェントが syslenz4j を使った Java アプリの設計支援に活用できる。",
+  "existing": {
+    "http_api": false,
+    "cli": false,
+    "mcp": false,
+    "healthz": false,
+    "volta_manifest": false,
+    "hosted_url": null
+  },
+  "proposed_namespace": "syslenz4j",
+  "capabilities": [
+    {
+      "verb": "JVM メトリクスを収集する",
+      "kind": "resource",
+      "name": "spec",
+      "uri": "syslenz4j://spec",
+      "maps_to": "spec/SPEC.md §2.1 JvmCollector"
+    },
+    {
+      "verb": "組込手順と使い方",
+      "kind": "resource",
+      "name": "guide",
+      "uri": "syslenz4j://guide",
+      "maps_to": "docs/getting-started.md"
+    },
+    {
+      "verb": "収集メトリクス一覧",
+      "kind": "resource",
+      "name": "metrics",
+      "uri": "syslenz4j://metrics",
+      "maps_to": "README.md §Collected Metrics; spec/SPEC.md §2.1.1"
+    },
+    {
+      "verb": "Watch API リファレンス",
+      "kind": "resource",
+      "name": "watch-api",
+      "uri": "syslenz4j://watch-api",
+      "maps_to": "docs/watch-api.md"
+    },
+    {
+      "verb": "TCP プロトコル仕様",
+      "kind": "resource",
+      "name": "protocol",
+      "uri": "syslenz4j://protocol",
+      "maps_to": "spec/SPEC.md §6.4 TCP Protocol"
+    },
+    {
+      "verb": "syslenz4j を Java アプリに組込んで JVM 監視を設定する手順",
+      "kind": "skill",
+      "name": "embed-syslenz4j",
+      "locality": "global",
+      "maps_to": "docs/getting-started.md + README-ja.md"
+    }
+  ],
+  "composition_examples": [
+    "syslenz4j を組込んだ Java アプリが TCP:9100 でメトリクスを公開 → syslenz --connect localhost:9100 で syslenz が収集 → syslenz の catalog__describe_service で syslenz の能力を発見",
+    "エージェントが syslenz4j://guide を読んで Java アプリに組込コードを生成 → Spring Boot に SyslenzLifecycle を追加 → syslenz 本体経由でアラートを観測"
+  ],
+  "dependencies": [
+    {
+      "repo": "syslenz",
+      "direction": "provides_to",
+      "capability": "TCP SNAPSHOT プロトコル（syslenz --connect が消費するサーバ側を実装）",
+      "exists_now": true,
+      "note": "syslenz4j が TCP サーバを立て、syslenz 本体が --connect で接続してメトリクスを収集する。syslenz は catalog に既に登録済み（id=syslenz, port=3009 prod）。syslenz4j 自体はvolta にホストされていない（environments が空）。"
+    }
+  ],
+  "library_serve": {
+    "needed": false,
+    "new_work": [],
+    "runtime": "java",
+    "estimated_effort": "S"
+  },
+  "risks": [
+    "TCP エンドポイントに認証なし（README のセキュリティ注意書きの通り）。MCP 経由で公開する場合は認証層が必要だが、そもそも MCP 化しない",
+    "MCP バックエンドとして独立プロセスで立てても、その JVM 自体のメトリクスしか取れない（組込先 JVM のメトリクスは取れない）ため、library-serve の価値がない",
+    "syslenz 本体と機能が重複する懸念はない（syslenz は /proc・/sys 系、syslenz4j は JVM 系で補完関係）"
+  ],
+  "open_questions": [
+    "syslenz4j の組込手順を skill として配る場合、locality を global にするか service（syslenz4j 固定）にするか。ライブラリなので global が自然だが、持ち主の判断を確認したい",
+    "resource としてメトリクス一覧やプロトコル仕様を配る場合、静的 Markdown から自動生成するか手動でメンテするか"
+  ]
+}

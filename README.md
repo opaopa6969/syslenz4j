@@ -350,6 +350,21 @@ public class SyslenzLifecycle implements SmartLifecycle {
 
 ---
 
+## MCP (volta participation)
+
+syslenz4j participates in the volta MCP facade (`https://mcp.unlaxer.org/mcp`) as **skill-only** — no MCP server is hosted (a standalone JVM process can only monitor itself, not the target app). Instead, the embed procedure is distributed as a **skill**.
+
+- **Namespace**: `syslenz4j`
+- **Skill**: `embed-syslenz4j` (embed steps, metrics catalog, Watch API, protocol spec)
+- **Source**: volta-mcp repo `docs/skills/syslenz4j__embed-syslenz4j/SKILL.md`
+- **Access**: MCP tool `skill__resolve(goal="embed JVM monitoring in a Java app")` or `skill__export(name="syslenz4j__embed-syslenz4j")`
+- **Design**: [docs/mcp/DESIGN.md](docs/mcp/DESIGN.md)
+- **Status**: [docs/mcp/STATUS.md](docs/mcp/STATUS.md)
+
+Agents read the skill, generate embed code, and observe metrics via syslenz (namespace `syslenz`, already in catalog). syslenz4j covers JVM metrics; syslenz covers OS/network — complementary.
+
+---
+
 ## Requirements
 
 - **Java 17** or later (uses `record`, sealed `switch` expressions)

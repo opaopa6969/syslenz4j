@@ -350,6 +350,21 @@ public class SyslenzLifecycle implements SmartLifecycle {
 
 ---
 
+## MCP（volta 参加状況）
+
+syslenz4j は **skill-only** で volta MCP ファサード（`https://mcp.unlaxer.org/mcp`）に参加している。MCP サーバは立てない（独立 JVM プロセスのメトリクスしか取れず、本来の価値に合わないため）。代わりに組込手順を **skill** として配る。
+
+- **namespace**: `syslenz4j`
+- **skill**: `embed-syslenz4j`（組込手順・メトリクス一覧・Watch API・プロトコル仕様）
+- **配信元**: volta-mcp リポジトリ `docs/skills/syslenz4j__embed-syslenz4j/SKILL.md`
+- **取得方法**: MCP tool `skill__resolve(goal="Java アプリに JVM 監視を組込む")` または `skill__export(name="syslenz4j__embed-syslenz4j")`
+- **設計書**: [docs/mcp/DESIGN.md](docs/mcp/DESIGN.md)
+- **状況**: [docs/mcp/STATUS.md](docs/mcp/STATUS.md)
+
+エージェントは skill を読んで組込コードを生成し、syslenz 本体（namespace `syslenz`、catalog に既存）経由でメトリクスを観測する。syslenz4j は JVM 系、syslenz 本体は OS/ネットワーク系で補完関係。
+
+---
+
 ## 動作要件
 
 - **Java 17** 以上（`record`、`switch` 式を使用）
