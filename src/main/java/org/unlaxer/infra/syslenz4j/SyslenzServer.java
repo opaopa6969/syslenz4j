@@ -39,6 +39,7 @@ public class SyslenzServer {
     private final String bindAddress;
     private final MetricRegistry registry;
     private final WatchRegistry watchRegistry;
+    private final JvmCollector collector;
     private volatile ServerSocket serverSocket;
     private volatile Thread serverThread;
     private volatile boolean running;
@@ -53,6 +54,7 @@ public class SyslenzServer {
         this.bindAddress = bindAddress != null ? bindAddress : "127.0.0.1";
         this.registry = registry;
         this.watchRegistry = watchRegistry;
+        this.collector = new JvmCollector();
     }
 
     /**
@@ -165,7 +167,6 @@ public class SyslenzServer {
     }
 
     private String collectSnapshot() {
-        JvmCollector collector = new JvmCollector();
         List<JvmCollector.Metric> jvmMetrics = collector.collect();
         List<JvmCollector.Metric> customMetrics = registry.collect();
 

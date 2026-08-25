@@ -41,6 +41,29 @@ public class JvmCollector {
         }
     }
 
+    // Cached MXBean references. The platform MXBeans are JVM-wide singletons
+    // (guaranteed by {@link ManagementFactory}), so caching their references is
+    // safe and is the pattern used by Micrometer, Dropwizard Metrics and the
+    // Prometheus Java client. Caching avoids the per-call PlatformComponent
+    // lookup performed by {@code ManagementFactory.get*MXBean()}.
+    private final MemoryMXBean memoryBean;
+    private final List<GarbageCollectorMXBean> gcBeans;
+    private final ThreadMXBean threadBean;
+    private final RuntimeMXBean runtimeBean;
+    private final OperatingSystemMXBean osBean;
+    private final ClassLoadingMXBean classLoadingBean;
+    private final List<BufferPoolMXBean> bufferPoolBeans;
+
+    public JvmCollector() {
+        this.memoryBean = ManagementFactory.getMemoryMXBean();
+        this.gcBeans = ManagementFactory.getGarbageCollectorMXBeans();
+        this.threadBean = ManagementFactory.getThreadMXBean();
+        this.runtimeBean = ManagementFactory.getRuntimeMXBean();
+        this.osBean = ManagementFactory.getOperatingSystemMXBean();
+        this.classLoadingBean = ManagementFactory.getClassLoadingMXBean();
+        this.bufferPoolBeans = ManagementFactory.getPlatformMXBeans(BufferPoolMXBean.class);
+    }
+
     /**
      * Collect all JVM metrics and return them as a list.
      */
@@ -59,7 +82,7 @@ public class JvmCollector {
     // ----- Memory --------------------------------------------------------
 
     private void collectMemory(List<Metric> metrics) {
-        MemoryMXBean mem = ManagementFactory.getMemoryMXBean();
+        MemoryMXBean mem = memoryBean;
 
         MemoryUsage heap = mem.getHeapMemoryUsage();
         metrics.add(new Metric("heap_used", heap.getUsed(), "Bytes", null,
@@ -82,7 +105,7 @@ public class JvmCollector {
         long totalCount = 0;
         long totalTimeMs = 0;
 
-        for (GarbageCollectorMXBean gc : ManagementFactory.getGarbageCollectorMXBeans()) {
+        for (GarbageCollectorMXBean gc : gcBeans) {
             String safeName = gc.getName().replaceAll("[^a-zA-Z0-9]", "_").toLowerCase();
             long count = gc.getCollectionCount();
             long timeMs = gc.getCollectionTime();
@@ -109,7 +132,7 @@ public class JvmCollector {
     // ----- Threads -------------------------------------------------------
 
     private void collectThreads(List<Metric> metrics) {
-        ThreadMXBean threads = ManagementFactory.getThreadMXBean();
+        ThreadMXBean threads = threadBean;
 
         metrics.add(new Metric("thread_count", threads.getThreadCount(), "Integer", "count",
                 "Current live thread count"));
@@ -128,7 +151,7 @@ public class JvmCollector {
     // ----- Runtime -------------------------------------------------------
 
     private void collectRuntime(List<Metric> metrics) {
-        RuntimeMXBean runtime = ManagementFactory.getRuntimeMXBean();
+        RuntimeMXBean runtime = runtimeBean;
 
         double uptimeSec = runtime.getUptime() / 1000.0;
         metrics.add(new Metric("uptime", uptimeSec, "Duration", "s",
@@ -140,7 +163,7 @@ public class JvmCollector {
     // ----- Operating System ----------------------------------------------
 
     private void collectOs(List<Metric> metrics) {
-        OperatingSystemMXBean os = ManagementFactory.getOperatingSystemMXBean();
+        OperatingSystemMXBean os = osBean;
 
         metrics.add(new Metric("available_processors", os.getAvailableProcessors(), "Integer", "count",
                 "Number of processors available to the JVM"));
@@ -172,7 +195,7 @@ public class JvmCollector {
     // ----- Class Loading -------------------------------------------------
 
     private void collectClassLoading(List<Metric> metrics) {
-        ClassLoadingMXBean cl = ManagementFactory.getClassLoadingMXBean();
+        ClassLoadingMXBean cl = classLoadingBean;
 
         metrics.add(new Metric("classes_loaded", cl.getLoadedClassCount(), "Integer", "count",
                 "Currently loaded class count"));
@@ -185,8 +208,7 @@ public class JvmCollector {
     // ----- Buffer Pools --------------------------------------------------
 
     private void collectBufferPools(List<Metric> metrics) {
-        List<BufferPoolMXBean> pools = ManagementFactory.getPlatformMXBeans(BufferPoolMXBean.class);
-        for (BufferPoolMXBean pool : pools) {
+        for (BufferPoolMXBean pool : bufferPoolBeans) {
             String safeName = pool.getName().replaceAll("[^a-zA-Z0-9]", "_").toLowerCase();
 
             long used = pool.getMemoryUsed();

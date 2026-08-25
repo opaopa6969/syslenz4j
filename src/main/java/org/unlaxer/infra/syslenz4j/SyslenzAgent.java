@@ -33,6 +33,7 @@ public final class SyslenzAgent {
 
     private static final MetricRegistry REGISTRY = new MetricRegistry();
     private static final WatchRegistry WATCHES = new WatchRegistry();
+    private static final JvmCollector COLLECTOR = new JvmCollector();
     private static volatile SyslenzServer serverInstance;
     private static volatile java.util.concurrent.ScheduledExecutorService evaluatorInstance;
 
@@ -83,8 +84,7 @@ public final class SyslenzAgent {
      * ProcEntry JSON を stdout に1回出力する（プラグインモード）。
      */
     public static void printSnapshot() {
-        JvmCollector collector = new JvmCollector();
-        String json = JsonExporter.export(collector.collect(), REGISTRY.collect());
+        String json = JsonExporter.export(COLLECTOR.collect(), REGISTRY.collect());
         System.out.println(json);
     }
 
@@ -193,9 +193,8 @@ public final class SyslenzAgent {
      */
     static void evaluateOnce() {
         try {
-            JvmCollector collector = new JvmCollector();
             WATCHES.evaluate(WatchRegistry.metricValues(
-                    collector.collect(), REGISTRY.collect()));
+                    COLLECTOR.collect(), REGISTRY.collect()));
         } catch (Exception e) {
             // 収集の一時的な失敗でスケジューラを止めない
         }
