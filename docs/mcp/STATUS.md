@@ -18,7 +18,7 @@
 | issue-hub 協調（provides_to 宣言） | 完了 | プロトコル互換は既存確立済み。返答不要で暫定進行 |
 | commit & push（syslenz4j repo） | 完了 | |
 | commit & push（volta-mcp repo） | 完了 | |
-| skill 配信確認（skill__list） | 完了 | |
+| skill 配信確認（skill__list） | 完了 | ファサード（prod aerie / 192.168.1.50）側で git pull → 再起動後に確認。SKILL.md は push 済み（volta-mcp commit 5b6cd7d）。ローカルで `loadSkillsDir` により正常にパースされることを確認済み |
 
 ## サーバ・デプロイ関連（不要）
 
