@@ -196,6 +196,6 @@ syslenz4j is designed to run inside the monitored JVM — not as a separate agen
 |-----------|------------------------|
 | `SyslenzAgent` | All static methods are thread-safe; `startServer()` is idempotent via double-checked locking |
 | `MetricRegistry` | `ConcurrentHashMap` — registrations and `collect()` are safe from any thread |
-| `WatchRegistry` | `CopyOnWriteArrayList` — `add()` and `evaluate()` are safe from concurrent threads |
+| `WatchRegistry` | `CopyOnWriteArrayList` protects registration changes; synchronized `evaluate()` serializes state transitions and callbacks across snapshot workers and the self-driven evaluator |
 | `SyslenzServer` | Single daemon thread; `start()`/`stop()` are safe to call from any thread |
 | Supplier callbacks | The library does not synchronize supplier calls — suppliers must be thread-safe themselves |

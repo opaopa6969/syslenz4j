@@ -53,7 +53,7 @@ class WatchRegistry {
      *
      * @param currentValues メトリクス名 → 現在値のマップ
      */
-    void evaluate(Map<String, Double> currentValues) {
+    synchronized void evaluate(Map<String, Double> currentValues) {
         long now = System.currentTimeMillis();
 
         for (WatchEntry entry : entries) {
