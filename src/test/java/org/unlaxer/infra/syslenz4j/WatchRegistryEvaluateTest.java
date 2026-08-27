@@ -5,6 +5,11 @@ import org.junit.jupiter.api.Test;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -87,5 +92,57 @@ class WatchRegistryEvaluateTest {
         registry.evaluate(values);
 
         assertEquals(1, registry.firingCount());
+    }
+
+    @Test
+    void concurrentEvaluationsAreSerialized() throws Exception {
+        CountDownLatch firingCallbackStarted = new CountDownLatch(1);
+        CountDownLatch releaseFiringCallback = new CountDownLatch(1);
+        CountDownLatch resolvingEvaluationStarted = new CountDownLatch(1);
+        CountDownLatch resolveCallbackCalled = new CountDownLatch(1);
+
+        SyslenzAgent.watch("cpu_load")
+                .greaterThan(50.0)
+                .cooldown(0)
+                .onFire(event -> {
+                    firingCallbackStarted.countDown();
+                    try {
+                        if (!releaseFiringCallback.await(5, TimeUnit.SECONDS)) {
+                            throw new AssertionError("timed out waiting to release onFire callback");
+                        }
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        throw new AssertionError("onFire callback was interrupted", e);
+                    }
+                })
+                .onResolve(event -> resolveCallbackCalled.countDown())
+                .register();
+
+        WatchRegistry registry = SyslenzAgent.watches();
+        ExecutorService evaluators = Executors.newFixedThreadPool(2);
+        try {
+            Future<?> firingEvaluation = evaluators.submit(
+                    () -> registry.evaluate(Map.of("cpu_load", 80.0)));
+            assertTrue(firingCallbackStarted.await(2, TimeUnit.SECONDS),
+                    "first evaluation should reach onFire callback");
+
+            Future<?> resolvingEvaluation = evaluators.submit(() -> {
+                resolvingEvaluationStarted.countDown();
+                registry.evaluate(Map.of("cpu_load", 20.0));
+            });
+            assertTrue(resolvingEvaluationStarted.await(2, TimeUnit.SECONDS),
+                    "second evaluation should attempt to enter evaluate()");
+            assertFalse(resolveCallbackCalled.await(200, TimeUnit.MILLISECONDS),
+                    "second evaluation must wait while the first callback holds the registry lock");
+
+            releaseFiringCallback.countDown();
+            firingEvaluation.get(2, TimeUnit.SECONDS);
+            resolvingEvaluation.get(2, TimeUnit.SECONDS);
+            assertTrue(resolveCallbackCalled.await(2, TimeUnit.SECONDS),
+                    "second evaluation should run after the first evaluation completes");
+        } finally {
+            releaseFiringCallback.countDown();
+            evaluators.shutdownNow();
+        }
     }
 }

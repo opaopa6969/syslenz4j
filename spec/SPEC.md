@@ -457,7 +457,7 @@ v1.1.1 時点では `UNKNOWN` 状態は存在しない。`WatchEntry` の初期�
 
 ### 4.4 評価スレッドと可視性
 
-`WatchRegistry.evaluate()` は `SyslenzServer` の accept スレッドから呼ばれる。`WatchEntry.wasFiring` と `WatchEntry.lastFiredAt` は volatile でないが、`CopyOnWriteArrayList` のイテレーション内で単一スレッドからのみ書き換えられるため実用上問題ない。`clearWatches()` は `CopyOnWriteArrayList.clear()` を呼び出し、アトミックに全エントリを削除する。
+`WatchRegistry.evaluate()` は、`SNAPSHOT` 接続を処理する複数のワーカースレッドと、`evaluateEvery()` が起動する `syslenz-watch-evaluator` スレッドから同時に呼ばれうる。`evaluate()` 全体を `synchronized` とし、`WatchEntry.wasFiring` / `lastFiredAt` の状態遷移とコールバック実行をレジストリ単位で直列化する。したがって、コールバック実行中は別スレッドの評価も待機する。`clearWatches()` は `CopyOnWriteArrayList.clear()` を呼び出し、アトミックに全エントリを削除する。
 
 ---
 
@@ -675,7 +675,7 @@ public class MetricRegistry {
 ```java
 class WatchRegistry {
     void add(WatchCondition condition)         // WatchCondition.register() から呼ばれる
-    void evaluate(Map<String, Double> values)  // SyslenzServer から呼ばれる
+    synchronized void evaluate(Map<String, Double> values) // Server / evaluator から呼ばれる
     int firingCount()                          // テスト用ユーティリティ
     void clear()                               // SyslenzAgent.clearWatches() から呼ばれる
 }
@@ -932,6 +932,7 @@ JUnit 5 (Jupiter) のみ使用。外部モックライブラリ (Mockito 等) �
 | `evaluateFiresCallbackWhenConditionMatches` | `greaterThan(80.0)` 条件に `90.0` を渡した時 `onFire` が呼ばれること、`WatchEvent` のフィールド値が正しいこと |
 | `evaluateResolvesWhenConditionClears` | 一度発火後、閾値を下回る値を渡した時 `onResolve` が呼ばれること |
 | `firingCountReflectsEvaluationResult` | `evaluate()` 前後で `firingCount()` が正しく変化すること |
+| `concurrentEvaluationsAreSerialized` | `onFire` 実行中の別スレッドによる評価が待機し、評価とコールバックが直列化されること |
 
 #### CompoundConditionChainTest
 

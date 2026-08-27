@@ -198,6 +198,6 @@ syslenz4j は、監視対象の JVM 内部で動作するように設計され�
 |------------|-------------------|
 | `SyslenzAgent` | すべての static メソッドはスレッドセーフ。`startServer()` はダブルチェックロッキングにより冪等 |
 | `MetricRegistry` | `ConcurrentHashMap` — 登録と `collect()` は任意スレッドから安全 |
-| `WatchRegistry` | `CopyOnWriteArrayList` — `add()` と `evaluate()` は並行スレッドから安全 |
+| `WatchRegistry` | `CopyOnWriteArrayList` が登録変更を保護し、`synchronized evaluate()` がスナップショット worker と自己駆動 evaluator 間の状態遷移・コールバックを直列化 |
 | `SyslenzServer` | 単一 daemon スレッド。`start()`/`stop()` は任意スレッドから安全に呼び出し可能 |
 | サプライヤーコールバック | ライブラリはサプライヤー呼び出しを同期しません — サプライヤー自身がスレッドセーフである必要があります |
