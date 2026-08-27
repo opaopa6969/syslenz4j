@@ -10,7 +10,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write
 
     steps:
       - uses: actions/checkout@v4
@@ -20,13 +19,21 @@ jobs:
         with:
           java-version: '17'
           distribution: 'temurin'
-          server-id: github
+          server-id: central
+          server-username: MAVEN_USERNAME
+          server-password: MAVEN_TOKEN
           settings-path: ${{ github.workspace }}
+          gpg-private-key: ${{ secrets.GPG_PRIVATE_KEY }}
+          gpg-passphrase: ${{ secrets.GPG_PASSPHRASE }}
+        env:
+          MAVEN_USERNAME: ${{ secrets.MAVEN_USERNAME }}
+          MAVEN_TOKEN: ${{ secrets.MAVEN_TOKEN }}
 
       - name: Build
         run: mvn -B package --file pom.xml
 
-      - name: Publish to GitHub Packages
+      - name: Publish to Maven Central
         run: mvn -B deploy --file pom.xml
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MAVEN_USERNAME: ${{ secrets.MAVEN_USERNAME }}
+          MAVEN_TOKEN: ${{ secrets.MAVEN_TOKEN }}
