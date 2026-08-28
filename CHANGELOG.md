@@ -14,6 +14,7 @@ Published to Maven Central as `org.unlaxer.infra:syslenz4j`.
 - **One request per connection** — the syslenz client reads responses until EOF, so keeping the connection open stalled it until its read timeout. The server now closes after responding, mirroring `syslenz --serve`. `QUIT` or an empty line also closes.
 - **NaN/Infinity metrics no longer corrupt the JSON** — `Float`/`Duration` metrics with non-finite values (e.g. a gauge dividing by zero) produced literals like `{"Float": NaN}` that strict JSON parsers reject, breaking the whole snapshot. Such metrics are now omitted.
 - **Control characters can no longer corrupt the syslenz TUI** — ANSI escape sequences in text metrics are stripped and remaining control characters are replaced with spaces. Previously they were `\uXXXX`-escaped (valid JSON), but the client unescaped them and wrote raw ESC bytes to the terminal.
+- **Publishing pipeline aligned to Maven Central (Central Portal)** — `publish.yml` was configured for GitHub Packages (`server-id: github`, `GITHUB_TOKEN`) while `pom.xml` targeted OSSRH/Central, so `mvn deploy` could never succeed. The workflow now targets the Central Publisher Portal: `server-id: central` with `MAVEN_USERNAME`/`MAVEN_TOKEN` (Portal user token) and `GPG_PRIVATE_KEY`/`GPG_PASSPHRASE` for signing. The legacy OSSRH `<distributionManagement>` block was removed (the `central-publishing-maven-plugin` handles deployment). Resolves #8.
 
 ### Added
 
