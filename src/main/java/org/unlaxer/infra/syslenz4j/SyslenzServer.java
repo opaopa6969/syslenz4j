@@ -35,6 +35,18 @@ public class SyslenzServer {
     private static final String SNAPSHOT_CMD = "SNAPSHOT";
     private static final int SO_TIMEOUT_MS = 30_000;
 
+    /**
+     * 1接続あたりのコマンド行の最大長(バイト)。
+     *
+     * <p>プロトコルは「1行コマンド + 改行」で、正常系コマンドは
+     * {@code SNAPSHOT}/{@code QUIT}/空行のみ。リモートから改行を送らずに
+     * 接続を維持するクライアントが {@code readLine()} のバッファで
+     * ヒープを無制限に消費するのを防ぐため、この長さに達した時点で
+     * 応答せず接続を閉じる(上限超過の異常入力に応答を返すと、
+     * それ自体が増幅のきっかけになるため)。
+     */
+    static final int MAX_COMMAND_BYTES = 1024;
+
     private final int port;
     private final String bindAddress;
     private final MetricRegistry registry;
@@ -138,11 +150,15 @@ public class SyslenzServer {
 
     private void handleClient(Socket client) throws IOException {
         client.setSoTimeout(SO_TIMEOUT_MS);
-        BufferedReader reader = new BufferedReader(new InputStreamReader(client.getInputStream(), "UTF-8"));
+        InputStreamReader rawIn = new InputStreamReader(client.getInputStream(), "UTF-8");
         OutputStream out = client.getOutputStream();
 
-        String line;
-        while ((line = reader.readLine()) != null) {
+        while (true) {
+            String line = readLineBounded(rawIn);
+            if (line == null) {
+                // EOF (client closed) or line exceeded MAX_COMMAND_BYTES
+                return;
+            }
             String trimmed = line.trim();
             if (SNAPSHOT_CMD.equalsIgnoreCase(trimmed)) {
                 String json = collectSnapshot();
@@ -153,17 +169,56 @@ public class SyslenzServer {
                 // One request per connection: the syslenz client reads the
                 // response with read_to_string (until EOF), so keeping the
                 // connection open would stall it until its read timeout.
-                break;
+                return;
             } else if (trimmed.isEmpty() || "QUIT".equalsIgnoreCase(trimmed)) {
-                break;
+                return;
             } else {
                 // Unknown command: return an error response and close the connection
                 String error = "ERROR unknown command: " + trimmed + "\n";
                 out.write(error.getBytes("UTF-8"));
                 out.flush();
-                break;
+                return;
             }
         }
+    }
+
+    /**
+     * 改行(または CR/LF)までの1行を読む。{@link BufferedReader#readLine()} と違い、
+     * {@link #MAX_COMMAND_BYTES} に達した時点で即座に {@code null} を返し、
+     * 上限を超える残りバイトを読み捨てずに呼び出し元で接続を閉じさせる
+     * (残りをブロックしながら読むと、改行を送らないクライアントが
+     * SO_TIMEOUT の間スレッドを専有できてしまうため)。
+     *
+     * @return 1行(改行は含まない)。上限超過またはEOF時は {@code null}
+     */
+    private static String readLineBounded(Reader in) throws IOException {
+        StringBuilder sb = new StringBuilder(64);
+        while (true) {
+            int c = in.read();
+            if (c == -1) {
+                return null;
+            }
+            if (c == '\n') {
+                break;
+            }
+            if (c == '\r') {
+                // CRLF を1行として扱うため LF を待つ(単独 CR でも行末とみなす)
+                if (in.markSupported()) {
+                    in.mark(1);
+                    int next = in.read();
+                    if (next != -1 && next != '\n') {
+                        in.reset();
+                    }
+                }
+                break;
+            }
+            if (sb.length() >= MAX_COMMAND_BYTES) {
+                // 上限到達: 残りを読まずに即座に切断を指示
+                return null;
+            }
+            sb.append((char) c);
+        }
+        return sb.toString();
     }
 
     private String collectSnapshot() {
