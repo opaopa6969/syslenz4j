@@ -154,6 +154,23 @@ class MetricRegistryTest {
                 "Good metric should still be collected despite sibling failure");
     }
 
+    /**
+     * NumberSupplier が null を返した場合、NPE が漏れず当該メトリクスがスキップされること (SPEC 5.5)。
+     * NPE がホストアプリに漏れると監視ライブラリがアプリをクラッシュさせる。
+     */
+    @Test
+    void supplierReturningNullIsSkippedSilently() {
+        registry.gauge("null_metric", () -> null);
+        registry.gauge("good_metric", () -> 42.0);
+
+        List<JvmCollector.Metric> metrics = assertDoesNotThrow(() -> registry.collect());
+
+        assertNull(findByName(metrics, "app_null_metric"),
+                "Metric whose supplier returned null should be absent");
+        assertNotNull(findByName(metrics, "app_good_metric"),
+                "Good metric should still be collected despite null sibling");
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
 
     private JvmCollector.Metric findByName(List<JvmCollector.Metric> metrics, String name) {

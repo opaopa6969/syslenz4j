@@ -84,4 +84,30 @@ class CompoundConditionChainTest {
 
         assertTrue(fired.get(), "lessThan compound chain should fire correctly");
     }
+
+    /**
+     * セカンダリメトリクスが値マップに存在しない場合は発火しないこと (SPEC 5.4)。
+     * 値が低すぎるケースは既存テストがカバーしているが、キー自体が不在のケースは未検証。
+     */
+    @Test
+    void compoundConditionDoesNotFireWhenSecondaryMetricIsAbsentFromMap() {
+        AtomicBoolean fired = new AtomicBoolean(false);
+
+        SyslenzAgent.watch("queue_size")
+                .greaterThan(10_000.0)
+                .and("error_rate").greaterThan(5.0)
+                .cooldown(0)
+                .onFire(e -> fired.set(true))
+                .register();
+
+        WatchRegistry registry = SyslenzAgent.watches();
+        // プライマリは条件成立、セカンダリはキー自体が map に無い
+        Map<String, Double> values = new HashMap<>();
+        values.put("queue_size", 20_000.0);
+        // error_rate は欠落
+        registry.evaluate(values);
+
+        assertFalse(fired.get(),
+                "Compound condition must not fire when the secondary metric key is absent");
+    }
 }
