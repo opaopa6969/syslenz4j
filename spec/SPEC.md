@@ -300,6 +300,7 @@ syslenz `--connect` プロトコルに準拠するシンプルなテキストプ
 - 1 リクエスト 1 接続なのは、syslenz クライアント (`capture_tcp`) が応答を EOF まで読むため。接続を維持するとクライアントは read タイムアウトまでブロックする
 - コマンドは case-insensitive (`SNAPSHOT`, `snapshot`, `Snapshot` いずれも有効)
 - 未知のコマンドには `ERROR unknown command: <cmd>` を 1 行返して接続を close する
+- **コマンド行の長さ上限**: `MAX_COMMAND_BYTES` (1024 バイト) を超える1行は、応答を返さず接続を close する。改行を送らないクライアントが `readLine()` のバッファでヒープを無制限に消費する DoS 経路を塞ぐため。正常系コマンドは遠かに短いため、この上限が正当なクライアントに影響することはない
 - ソケットタイムアウト: `SO_TIMEOUT = 30_000ms`
 
 #### 2.4.2 実装特性
