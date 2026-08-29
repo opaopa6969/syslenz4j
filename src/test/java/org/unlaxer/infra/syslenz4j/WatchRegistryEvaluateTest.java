@@ -11,6 +11,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -144,5 +145,57 @@ class WatchRegistryEvaluateTest {
             releaseFiringCallback.countDown();
             evaluators.shutdownNow();
         }
+    }
+
+    // ── callback exception isolation (SPEC 10.4 fail-safe) ────────────────────
+
+    /**
+     * onFire が例外を投げても wasFiring は true に遷移し、firingCount() に反映されること。
+     * これが壊れると、コールバック例外でアラート状態が不整合になり監視全体が腐る。
+     */
+    @Test
+    void onFireThrowingExceptionDoesNotCorruptFiringState() {
+        SyslenzAgent.watch("heap_used_pct")
+                .greaterThan(80.0)
+                .cooldown(0)
+                .onFire(e -> { throw new RuntimeException("callback boom"); })
+                .register();
+
+        WatchRegistry registry = SyslenzAgent.watches();
+        // 例外が漏れないこと
+        assertDoesNotThrow(() -> registry.evaluate(Map.of("heap_used_pct", 90.0)));
+
+        // 例外が飛んでも状態遷移は完了していること
+        assertEquals(1, registry.firingCount(),
+                "wasFiring must be true even if onFire throws");
+    }
+
+    /**
+     * ある Watch のコールバックが例外を投げても、後続 Watch の評価が継続すること。
+     * CopyOnWriteArrayList の順序に依存するため、例外を投げる側を先に登録する。
+     */
+    @Test
+    void onFireExceptionInOneWatchDoesNotBlockSubsequentWatches() {
+        AtomicBoolean secondFired = new AtomicBoolean(false);
+
+        SyslenzAgent.watch("primary_metric")
+                .greaterThan(50.0)
+                .cooldown(0)
+                .onFire(e -> { throw new RuntimeException("first watch boom"); })
+                .register();
+        SyslenzAgent.watch("secondary_metric")
+                .greaterThan(50.0)
+                .cooldown(0)
+                .onFire(e -> secondFired.set(true))
+                .register();
+
+        WatchRegistry registry = SyslenzAgent.watches();
+        Map<String, Double> values = new HashMap<>();
+        values.put("primary_metric", 80.0);
+        values.put("secondary_metric", 80.0);
+
+        assertDoesNotThrow(() -> registry.evaluate(values));
+        assertTrue(secondFired.get(),
+                "Second watch must still fire even if the first watch's onFire throws");
     }
 }
