@@ -104,13 +104,13 @@ TCP 接続（ポート P）
 
 ### サーバースレッドモデル
 
-`SyslenzServer` は単一の daemon スレッドで接続を受け付け、accept したソケットごとにキャッシュ型ワーカースレッドプール（`Executors.newCachedThreadPool`）へ振り分けます。これにより遅い・アイドルなクライアントが他の接続をブロックしません:
+`SyslenzServer` は単一の daemon スレッドで接続を受け付け、accept したソケットを最大64本の固定ワーカースレッドへ振り分けます。全ワーカーがビジーの場合、新規接続は即時クローズされるため、遅い・アイドルなクライアントによるスレッド数の無制限な増加を防ぎます:
 
 ```mermaid
 flowchart TB
     AL["acceptLoop（daemon スレッド）"]
     Accept["serverSocket.accept()<br/>1秒ごとに running フラグを確認"]
-    Submit["workerPool.submit(...)<br/>（接続ごとの daemon ワーカースレッド）"]
+    Submit["workerPool.execute(...)<br/>（最大64本の daemon ワーカー）"]
     Handle["handleClient(socket)<br/>1リクエストを処理して閉じる"]
     AL --> Accept --> Submit --> Handle
 ```

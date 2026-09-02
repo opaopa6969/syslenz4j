@@ -5,6 +5,9 @@ import org.junit.jupiter.api.Test;
 
 import java.io.*;
 import java.net.Socket;
+import java.net.SocketTimeoutException;
+import java.util.ArrayList;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -149,5 +152,49 @@ class ServerCommandProtocolTest {
         assertNotNull(response, "Server must still accept new connections after an oversized line");
         assertTrue(response.contains("\"source\""),
                 "Server must still process SNAPSHOT after handling an oversized line, got: " + response);
+    }
+
+    /** Slow clients must not cause more than the bounded worker count or wait indefinitely. */
+    @Test
+    void rejectsConnectionsWhenWorkerPoolIsFull() throws Exception {
+        int port = 19199;
+        SyslenzAgent.startServer(port, "127.0.0.1");
+        Thread.sleep(200);
+
+        List<Socket> slowClients = new ArrayList<>();
+        try {
+            for (int i = 0; i < SyslenzServer.MAX_WORKER_THREADS; i++) {
+                slowClients.add(new Socket("127.0.0.1", port));
+            }
+
+            long deadline = System.currentTimeMillis() + 3_000;
+            while (workerCount(port) < SyslenzServer.MAX_WORKER_THREADS
+                    && System.currentTimeMillis() < deadline) {
+                Thread.sleep(10);
+            }
+            assertEquals(SyslenzServer.MAX_WORKER_THREADS, workerCount(port),
+                    "slow clients should occupy at most the configured worker count");
+
+            try (Socket rejected = new Socket("127.0.0.1", port)) {
+                rejected.setSoTimeout(2_000);
+                assertEquals(-1, rejected.getInputStream().read(),
+                        "connections over the worker limit must be closed without a response");
+            } catch (SocketTimeoutException e) {
+                fail("connection over the worker limit was left hanging", e);
+            }
+        } finally {
+            for (Socket socket : slowClients) {
+                socket.close();
+            }
+        }
+    }
+
+    private static int workerCount(int port) {
+        String prefix = "syslenz-worker-" + port;
+        int count = 0;
+        for (Thread thread : Thread.getAllStackTraces().keySet()) {
+            if (thread.getName().equals(prefix) && thread.isAlive()) count++;
+        }
+        return count;
     }
 }

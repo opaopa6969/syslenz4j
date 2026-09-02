@@ -9,7 +9,9 @@ import java.net.SocketException;
 import java.net.SocketTimeoutException;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.SynchronousQueue;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -34,6 +36,7 @@ public class SyslenzServer {
 
     private static final String SNAPSHOT_CMD = "SNAPSHOT";
     private static final int SO_TIMEOUT_MS = 30_000;
+    static final int MAX_WORKER_THREADS = 64;
 
     /**
      * 1接続あたりのコマンド行の最大長(バイト)。
@@ -76,11 +79,18 @@ public class SyslenzServer {
         if (running) return;
         running = true;
 
-        workerPool = Executors.newCachedThreadPool(r -> {
+        workerPool = new ThreadPoolExecutor(
+            MAX_WORKER_THREADS,
+            MAX_WORKER_THREADS,
+            0L,
+            TimeUnit.MILLISECONDS,
+            new SynchronousQueue<>(),
+            r -> {
             Thread t = new Thread(r, "syslenz-worker-" + port);
             t.setDaemon(true);
             return t;
-        });
+            },
+            new ThreadPoolExecutor.AbortPolicy());
 
         serverThread = new Thread(this::acceptLoop, "syslenz-server-" + port);
         serverThread.setDaemon(true);
@@ -127,16 +137,21 @@ public class SyslenzServer {
                     continue; // check running flag
                 }
                 final Socket finalClient = client;
-                workerPool.submit(() -> {
-                    try {
-                        handleClient(finalClient);
-                    } catch (Exception e) {
-                        // Log to stderr but don't crash the server
-                        System.err.println("[syslenz-server] client error: " + e.getMessage());
-                    } finally {
-                        try { finalClient.close(); } catch (IOException ignored) {}
-                    }
-                });
+                try {
+                    workerPool.execute(() -> {
+                        try {
+                            handleClient(finalClient);
+                        } catch (Exception e) {
+                            // Log to stderr but don't crash the server
+                            System.err.println("[syslenz-server] client error: " + e.getMessage());
+                        } finally {
+                            try { finalClient.close(); } catch (IOException ignored) {}
+                        }
+                    });
+                } catch (RejectedExecutionException e) {
+                    // Do not retain sockets when all bounded workers are busy.
+                    try { finalClient.close(); } catch (IOException ignored) {}
+                }
             }
         } catch (SocketException e) {
             if (running) {

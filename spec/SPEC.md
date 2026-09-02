@@ -306,7 +306,7 @@ syslenz `--connect` プロトコルに準拠するシンプルなテキストプ
 #### 2.4.2 実装特性
 
 - `ServerSocket` の `setSoTimeout(1000)` により `running` フラグを 1 秒ごとにチェック
-- accept は単一デーモンスレッド (`"syslenz-server-<port>"`)。accept したソケットはキャッシュ型ワーカープール (`Executors.newCachedThreadPool`, スレッド名 `"syslenz-worker-<port>"`) に submit され、接続ごとに並行処理される。これにより遅い・アイドルなクライアントが他の接続をブロックしない
+- accept は単一デーモンスレッド (`"syslenz-server-<port>"`)。accept したソケットは最大64本の固定ワーカープール (スレッド名 `"syslenz-worker-<port>"`) に渡され、接続ごとに並行処理される。全ワーカーがビジーの場合、新規接続は即時クローズされる。これにより遅い・アイドルなクライアントによるスレッド数の無制限な増加を防ぐ
 - 各接続は1リクエスト処理後にクローズする (syslenz クライアントは EOF まで読むため)
 - クライアントハンドリング中の例外は `System.err` に出力するが、サーバーはクラッシュしない
 - `stop()` は `ServerSocket.close()` を呼び出して `acceptLoop` を `SocketException` 経由で終了させ、ワーカープールをシャットダウンして処理中ハンドラの完了を最大5秒待つ
