@@ -104,13 +104,13 @@ TCP connection on port P
 
 ### Server Threading Model
 
-`SyslenzServer` uses a single daemon thread to accept connections; each accepted socket is dispatched to a cached worker-thread pool (`Executors.newCachedThreadPool`), so a slow or idle client cannot block other connections:
+`SyslenzServer` uses a single daemon thread to accept connections; each accepted socket is dispatched to a fixed pool of at most 64 worker threads. When all workers are busy, new connections are closed immediately, preventing slow or idle clients from causing unbounded thread growth:
 
 ```mermaid
 flowchart TB
     AL["acceptLoop (daemon thread)"]
     Accept["serverSocket.accept()<br/>wakes up every 1 s to check running flag"]
-    Submit["workerPool.submit(...)<br/>(daemon worker thread per connection)"]
+    Submit["workerPool.execute(...)<br/>(up to 64 daemon workers)"]
     Handle["handleClient(socket)<br/>processes one request, then closes"]
     AL --> Accept --> Submit --> Handle
 ```
