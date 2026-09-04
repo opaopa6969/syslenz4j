@@ -184,6 +184,14 @@ The secondary operator methods (`greaterThan`, `lessThan`, `greaterThanOrEqual`,
 
 Commits the condition to `WatchRegistry`. After this call the `WatchCondition` object should not be reused or further modified.
 
+`register()` never throws because of an incomplete condition. If no operator method was called on the condition — or `.and(metric)` was used without choosing an operator for the secondary metric — the condition is still registered, a warning is printed to `stderr`, and the watch simply **never fires**:
+
+```
+[syslenz] watch "app_queue_size" has no operator configured; it will never fire
+```
+
+This is deliberate: a watch misconfiguration must not take down the application being monitored. An incompletely configured watch is inert — it never fires, never appears in `alerts`, and cannot affect the evaluation of any other watch.
+
 ---
 
 ## WatchEvent Reference

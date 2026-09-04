@@ -136,12 +136,32 @@ public class WatchCondition {
     // ── 登録 ──
 
     public void register() {
+        warnIfIncomplete();
         registry.add(this);
+    }
+
+    /**
+     * 演算子が選ばれないまま登録された条件を警告する。
+     *
+     * <p>例外は投げない。監視の設定ミスで被監視アプリの起動を止めないためで、
+     * この条件は {@link #evaluate(double)} 側で「発火しない」として扱われる。
+     */
+    private void warnIfIncomplete() {
+        if (operator == null) {
+            System.err.println("[syslenz] watch \"" + metricName
+                    + "\" has no operator configured; it will never fire");
+        } else if (compound != null && compound.operator == null) {
+            System.err.println("[syslenz] watch \"" + metricName
+                    + "\" has no operator configured for its secondary metric \""
+                    + compound.metricName + "\"; it will never fire");
+        }
     }
 
     // ── 内部 ──
 
     boolean evaluate(double value) {
+        // 演算子未設定の条件は発火しない (fail-safe)。switch(null) の NPE を防ぐ。
+        if (operator == null) return false;
         return switch (operator) {
             case GREATER_THAN -> value > threshold;
             case LESS_THAN -> value < threshold;
@@ -217,6 +237,8 @@ public class WatchCondition {
         }
 
         boolean evaluate(double value) {
+            // 演算子未設定のセカンダリ条件は満たされない (fail-safe)。
+            if (operator == null) return false;
             return switch (operator) {
                 case GREATER_THAN -> value > threshold;
                 case LESS_THAN -> value < threshold;

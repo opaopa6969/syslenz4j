@@ -23,6 +23,7 @@ class WatchRegistry {
         long lastFiredAt = 0;
         volatile double lastValue = Double.NaN;
         volatile long firingSince = 0;
+        boolean evaluationFailureLogged = false;
 
         WatchEntry(WatchCondition condition) {
             this.condition = condition;
@@ -57,49 +58,68 @@ class WatchRegistry {
         long now = System.currentTimeMillis();
 
         for (WatchEntry entry : entries) {
-            WatchCondition cond = entry.condition;
-            Double value = currentValues.get(cond.metricName());
-            if (value == null) continue;
-
-            boolean matches = cond.evaluate(value);
-
-            // 複合条件のチェック
-            if (matches && cond.compound() != null) {
-                Double otherValue = currentValues.get(cond.compound().metricName);
-                if (otherValue == null || !cond.compound().evaluate(otherValue)) {
-                    matches = false;
+            try {
+                evaluateEntry(entry, currentValues, now);
+            } catch (Exception e) {
+                // 1件の条件の評価失敗で残りの条件やスナップショット全体を
+                // 止めない。同じ条件では初回だけ報告する（毎回のスナップショットで
+                // 出力が膨らむのを避けるため）。
+                if (!entry.evaluationFailureLogged) {
+                    entry.evaluationFailureLogged = true;
+                    System.err.println("[syslenz] watch \"" + entry.condition.metricName()
+                            + "\" evaluation failed and was skipped: " + e);
                 }
             }
+        }
+    }
 
-            entry.lastValue = value;
+    /**
+     * 条件1件を評価する。ここから送出された例外は {@link #evaluate(Map)} 側で
+     * 捕捉され、その条件だけがスキップされる。
+     */
+    private void evaluateEntry(WatchEntry entry, Map<String, Double> currentValues, long now) {
+        WatchCondition cond = entry.condition;
+        Double value = currentValues.get(cond.metricName());
+        if (value == null) return;
 
-            if (matches && !entry.wasFiring) {
-                // 新規発火（クールダウン確認）
-                if (now - entry.lastFiredAt >= cond.cooldownMs()) {
-                    entry.wasFiring = true;
-                    entry.lastFiredAt = now;
-                    entry.firingSince = now;
-                    if (cond.onFire() != null) {
-                        try {
-                            cond.onFire().accept(
-                                WatchEvent.firing(cond.metricName(), value, cond.severity())
-                            );
-                        } catch (Exception e) {
-                            // コールバックの例外はスキップ
-                        }
-                    }
-                }
-            } else if (!matches && entry.wasFiring) {
-                // 解除
-                entry.wasFiring = false;
-                if (cond.onResolve() != null) {
+        boolean matches = cond.evaluate(value);
+
+        // 複合条件のチェック
+        if (matches && cond.compound() != null) {
+            Double otherValue = currentValues.get(cond.compound().metricName);
+            if (otherValue == null || !cond.compound().evaluate(otherValue)) {
+                matches = false;
+            }
+        }
+
+        entry.lastValue = value;
+
+        if (matches && !entry.wasFiring) {
+            // 新規発火（クールダウン確認）
+            if (now - entry.lastFiredAt >= cond.cooldownMs()) {
+                entry.wasFiring = true;
+                entry.lastFiredAt = now;
+                entry.firingSince = now;
+                if (cond.onFire() != null) {
                     try {
-                        cond.onResolve().accept(
-                            WatchEvent.resolved(cond.metricName(), value, cond.severity())
+                        cond.onFire().accept(
+                            WatchEvent.firing(cond.metricName(), value, cond.severity())
                         );
                     } catch (Exception e) {
                         // コールバックの例外はスキップ
                     }
+                }
+            }
+        } else if (!matches && entry.wasFiring) {
+            // 解除
+            entry.wasFiring = false;
+            if (cond.onResolve() != null) {
+                try {
+                    cond.onResolve().accept(
+                        WatchEvent.resolved(cond.metricName(), value, cond.severity())
+                    );
+                } catch (Exception e) {
+                    // コールバックの例外はスキップ
                 }
             }
         }
