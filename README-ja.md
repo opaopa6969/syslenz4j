@@ -240,7 +240,7 @@ SyslenzAgent.stopEvaluator();                        // 停止
 
 発火中の Watch は、すべてのスナップショット応答に `alerts` 配列として含まれます。`--connect` で接続した syslenz TUI のステータスバー（`[!!1 CRIT]`）と `jvm` ソースの重要度バッジに表示されます。
 
-> **複合条件についての注記（v1.1.1）**: `.and()` の fluent チェーンは正常に動作します。`CompoundCondition` の `greaterThan()` / `lessThan()` / `greaterThanOrEqual()` / `lessThanOrEqual()` はいずれも親の `WatchCondition` を返すため、チェーンは途切れません。ただし*二次*メトリクスの評価で実際に効くのは現状 `greaterThan` / `lessThan` のみで、二次条件の `greaterThanOrEqual` / `lessThanOrEqual` はビルダー上は受理されるものの評価時には常に真として扱われます。Watch コールバックは自動発火するようになりました: `WatchRegistry.evaluate()` が `SNAPSHOT` パスに組み込まれており、スナップショット要求のたびに全 Watch が評価されます（クライアント未接続時にも評価したい場合は `evaluateEvery(Duration)` を使用）。
+> **複合条件についての注記**: `.and()` の fluent チェーンは正常に動作します。`CompoundCondition` の `greaterThan()` / `lessThan()` / `greaterThanOrEqual()` / `lessThanOrEqual()` はいずれも親の `WatchCondition` を返すため、チェーンは途切れません。この 4 演算子はいずれも、二次条件でもプライマリ条件と同じ閾値意味論で評価されます。Watch コールバックは自動発火するようになりました: `WatchRegistry.evaluate()` が `SNAPSHOT` パスに組み込まれており、スナップショット要求のたびに全 Watch が評価されます（クライアント未接続時にも評価したい場合は `evaluateEvery(Duration)` を使用）。
 
 ---
 

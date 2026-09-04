@@ -284,7 +284,7 @@ SyslenzAgent.watch("app_queue_size")
     .register();
 ```
 
-`CompoundCondition` は `WatchCondition` の内部クラスであり、`evaluate(double value)` メソッドで独立して評価される。ビルダーには `greaterThan`, `lessThan`, `greaterThanOrEqual`, `lessThanOrEqual` の4メソッドがあり、いずれも親の `WatchCondition` を返してチェーンを継続できる。ただし `evaluate()` が実際に処理するのは `GREATER_THAN` と `LESS_THAN` のみで、`>=` / `<=` を含むその他の演算子は `default: true` にフォールスルーする (v1.1.1 時点の既知制限)。
+`CompoundCondition` は `WatchCondition` の内部クラスであり、`evaluate(double value)` メソッドで独立して評価される。ビルダーには `greaterThan`, `lessThan`, `greaterThanOrEqual`, `lessThanOrEqual` の4メソッドがあり、いずれも親の `WatchCondition` を返してチェーンを継続できる。`evaluate()` はこの 4 演算子を、プライマリ条件と同じ閾値意味論で評価する。
 
 ### 2.4 TCP サーバー (SyslenzServer)
 
@@ -495,11 +495,11 @@ return switch (operator) {
     case LESS_THAN             -> value < threshold;
     case GREATER_THAN_OR_EQUAL -> value >= threshold;
     case LESS_THAN_OR_EQUAL    -> value <= threshold;
-    default                    -> true;  // 既知制限: 他演算子は常に true
+    default                    -> false;  // ビルダーからは到達不能 (fail-safe)
 };
 ```
 
-`EQUAL`, `NOT_EQUAL`, `OUTSIDE_RANGE`, `INSIDE_RANGE` は v1.1.1 時点でセカンダリ条件では未実装 (常に true)。
+セカンダリ条件のビルダーは上記 4 演算子しか公開していないため `default` 分岐は到達しないが、誤発火を避けるため `false` (fail-safe) を返す。
 
 ### 5.2 クールダウン (Cooldown)
 
@@ -937,13 +937,18 @@ JUnit 5 (Jupiter) のみ使用。外部モックライブラリ (Mockito 等) �
 
 #### CompoundConditionChainTest
 
-**目的:** v1.1.0 での `CompoundCondition.greaterThan()` が `null` を返すバグを保護する。
+**目的:** v1.1.0 での `CompoundCondition.greaterThan()` が `null` を返すバグと、セカンダリ `>=` / `<=` が常に真として扱われていたバグ (issue #20) を保護する。
 
 | テスト名 | 検証内容 |
 |---------|---------|
 | `compoundGreaterThanDoesNotBreakChain` | `.and(metric).greaterThan(v)` 後に続くメソッドチェーンが NPE を投げないこと。両条件成立時に発火すること |
 | `compoundConditionDoesNotFireWhenOnlyPrimaryMatches` | セカンダリ条件が不成立の場合は発火しないこと |
 | `compoundLessThanChainWorks` | `lessThan` を含む複合条件が正しく動作すること |
+| `compoundGreaterThanOrEqualFiresAtSecondaryBoundary` | セカンダリ `>=` が閾値ちょうどで発火すること |
+| `compoundGreaterThanOrEqualDoesNotFireBelowSecondaryThreshold` | セカンダリ `>=` が閾値未満で発火しないこと |
+| `compoundLessThanOrEqualFiresAtSecondaryBoundary` | セカンダリ `<=` が閾値ちょうどで発火すること |
+| `compoundLessThanOrEqualDoesNotFireAboveSecondaryThreshold` | セカンダリ `<=` が閾値超過で発火しないこと |
+| `compoundConditionDoesNotFireWhenSecondaryMetricIsAbsentFromMap` | セカンダリメトリクスのキー自体が値マップにない場合は発火しないこと |
 
 #### LocalhostBindingTest
 
@@ -1634,7 +1639,7 @@ SyslenzAgent.watch("queue_depth").greaterThan(1000).register();      // これ�
 
 #### 複合条件が期待通りに動作しない
 
-セカンダリ条件の演算子が `EQUAL`, `NOT_EQUAL`, `OUTSIDE_RANGE`, `INSIDE_RANGE` の場合、v1.1.1 時点では常に `true` として扱われる。セカンダリには `greaterThan`, `lessThan`, `greaterThanOrEqual`, `lessThanOrEqual` のみを使用すること。
+セカンダリ条件に使えるのは `greaterThan`, `lessThan`, `greaterThanOrEqual`, `lessThanOrEqual` の 4 演算子で、いずれもプライマリ条件と同じ閾値意味論で評価される。`equalTo` / `notEqualTo` / `outsideRange` / `insideRange` はセカンダリ条件のビルダーには存在しない。また、セカンダリメトリクスが値マップに存在しない場合、複合 Watch は発火しない。
 
 #### `process_cpu_load` がスナップショットに含まれない
 

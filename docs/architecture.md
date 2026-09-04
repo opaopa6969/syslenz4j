@@ -162,7 +162,7 @@ stateDiagram-v2
 
 ### Compound Condition Chain (since v1.1.1)
 
-`CompoundCondition.greaterThan()` / `lessThan()` / `greaterThanOrEqual()` / `lessThanOrEqual()` all return the parent `WatchCondition`, so `.and("x").greaterThan(v)` chains normally back into the builder. Note that the *secondary* condition's `evaluate()` only implements `GREATER_THAN` and `LESS_THAN`; the `>=` / `<=` overloads are accepted by the builder but currently treated as always-true at evaluation time.
+`CompoundCondition.greaterThan()` / `lessThan()` / `greaterThanOrEqual()` / `lessThanOrEqual()` all return the parent `WatchCondition`, so `.and("x").greaterThan(v)` chains normally back into the builder. The secondary condition evaluates the same threshold semantics as the primary condition for these four operators.
 
 ---
 
