@@ -240,7 +240,7 @@ SyslenzAgent.stopEvaluator();                        // stop it again
 
 Firing watches are included in every snapshot response as an `alerts` array. A syslenz TUI connected via `--connect` shows them in its status bar (`[!!1 CRIT]`) and as severity badges on the `jvm` source.
 
-> **Note on compound conditions (v1.1.1)**: The `.and()` fluent chain works — `CompoundCondition.greaterThan()` / `lessThan()` / `greaterThanOrEqual()` / `lessThanOrEqual()` all return the parent `WatchCondition`, so the chain continues normally. However, evaluation of the *secondary* metric currently only applies `greaterThan` / `lessThan`; the `greaterThanOrEqual` / `lessThanOrEqual` overloads on the secondary condition are accepted by the builder but treated as always-true at evaluation time. Watch callbacks now fire automatically: `WatchRegistry.evaluate()` is wired into the `SNAPSHOT` path, so every snapshot request evaluates all watches (use `evaluateEvery(Duration)` to also evaluate while no client is connected).
+> **Note on compound conditions**: The `.and()` fluent chain works — `CompoundCondition.greaterThan()` / `lessThan()` / `greaterThanOrEqual()` / `lessThanOrEqual()` all return the parent `WatchCondition`, so the chain continues normally. All four secondary operators are evaluated with the same threshold semantics as the primary condition. Watch callbacks now fire automatically: `WatchRegistry.evaluate()` is wired into the `SNAPSHOT` path, so every snapshot request evaluates all watches (use `evaluateEvery(Duration)` to also evaluate while no client is connected).
 
 ---
 

@@ -29,4 +29,5 @@ status: implemented
 - Boundary: primary true + secondary `>=` equal threshold -> fires.
 - Boundary: primary true + secondary `<=` equal threshold -> fires.
 - Failure: primary true + secondary `>=` below threshold -> does not fire.
+- Failure: primary true + secondary `<=` above threshold -> does not fire.
 - Failure: primary true + secondary metric absent -> does not fire.

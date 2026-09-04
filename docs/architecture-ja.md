@@ -164,7 +164,7 @@ stateDiagram-v2
 
 ### CompoundCondition の fluent チェーン（v1.1.1 以降）
 
-`CompoundCondition.greaterThan()` / `lessThan()` / `greaterThanOrEqual()` / `lessThanOrEqual()` はいずれも親の `WatchCondition` を返すため、`.and("x").greaterThan(v)` はそのままビルダーへチェーンして続けられます。ただしセカンダリ条件の `evaluate()` は現状 `GREATER_THAN` と `LESS_THAN` のみ実装しており、`>=` / `<=` のオーバーロードはビルダーで受理されますが評価時には常に真として扱われます。
+`CompoundCondition.greaterThan()` / `lessThan()` / `greaterThanOrEqual()` / `lessThanOrEqual()` はいずれも親の `WatchCondition` を返すため、`.and("x").greaterThan(v)` はそのままビルダーへチェーンして続けられます。セカンダリ条件はこの 4 演算子について、プライマリ条件と同じ閾値意味論で評価されます。
 
 ---
 

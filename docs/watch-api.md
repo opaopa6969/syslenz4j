@@ -255,12 +255,6 @@ SyslenzAgent.evaluateEvery(Duration.ofSeconds(10));  // daemon thread
 SyslenzAgent.stopEvaluator();                         // stop it again
 ```
 
-### Known limitation
-
-**Secondary condition operators are incomplete.** `CompoundCondition.evaluate()` only handles `GREATER_THAN` and `LESS_THAN`; the `>=` / `<=` overloads chain correctly but fall through to `default -> true` (always passes) at evaluation time. Tracked in [GitHub issue #3](https://github.com/opaopa6969/syslenz4j/issues/3).
-
----
-
 ## Tips
 
 **Naming custom metrics for watches**: Register the metric with a descriptive name. Watches accept either the registered name or the generated `app_`-prefixed name.

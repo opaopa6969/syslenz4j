@@ -178,8 +178,6 @@ SyslenzAgent.watch("app_queue_size")
 
 セカンダリ条件の演算子メソッド（`greaterThan`・`lessThan`・`greaterThanOrEqual`・`lessThanOrEqual`）はいずれも親の `WatchCondition` を返すため、`.and("x").greaterThan(v)` の後も `.severity()`・`.onFire()`・`.register()` などをそのままチェーンできます。
 
-> **現状の制限（v1.1.1）**: セカンダリ条件で実際に評価されるのは `greaterThan` と `lessThan` のみです。`greaterThanOrEqual` / `lessThanOrEqual` のオーバーロードはコンパイル・チェーンともに通りますが、評価時には常に真として扱われます（その場合、Watch はプライマリ条件のみで発火します）。詳細は [GitHub #3](https://github.com/opaopa6969/syslenz4j/issues/3)。
-
 ---
 
 ### `.register()`
@@ -256,12 +254,6 @@ Watch の評価はスナップショットパスに組み込まれています�
 SyslenzAgent.evaluateEvery(Duration.ofSeconds(10));  // daemon スレッド
 SyslenzAgent.stopEvaluator();                         // 停止
 ```
-
-### 現状の制限
-
-**セカンダリ条件の演算子が不完全。** `CompoundCondition.evaluate()` は `GREATER_THAN` と `LESS_THAN` のみ処理します。`>=` / `<=` のオーバーロードはチェーンこそ通りますが、評価時には `default -> true`（常に真）にフォールスルーします。[GitHub issue #3](https://github.com/opaopa6969/syslenz4j/issues/3) で追跡中。
-
----
 
 ## Tips
 

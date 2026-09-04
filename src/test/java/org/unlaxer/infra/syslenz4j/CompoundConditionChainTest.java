@@ -145,6 +145,26 @@ class CompoundConditionChainTest {
         assertTrue(fired.get(), "compound <= should fire when the secondary metric equals the threshold");
     }
 
+    @Test
+    void compoundLessThanOrEqualDoesNotFireAboveSecondaryThreshold() {
+        AtomicBoolean fired = new AtomicBoolean(false);
+
+        SyslenzAgent.watch("available_memory")
+                .lessThan(100.0)
+                .and("cpu_load").lessThanOrEqual(90.0)
+                .cooldown(0)
+                .onFire(e -> fired.set(true))
+                .register();
+
+        WatchRegistry registry = SyslenzAgent.watches();
+        Map<String, Double> values = new HashMap<>();
+        values.put("available_memory", 50.0);
+        values.put("cpu_load", 90.1);
+        registry.evaluate(values);
+
+        assertFalse(fired.get(), "compound <= must not fire when the secondary metric is above threshold");
+    }
+
     /**
      * セカンダリメトリクスが値マップに存在しない場合は発火しないこと (SPEC 5.4)。
      * 値が低すぎるケースは既存テストがカバーしているが、キー自体が不在のケースは未検証。
