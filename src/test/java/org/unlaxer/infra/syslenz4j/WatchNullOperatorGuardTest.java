@@ -5,11 +5,15 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
+import java.io.PrintStream;
 import java.io.PrintWriter;
+import java.net.ServerSocket;
 import java.net.Socket;
+import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -82,8 +86,11 @@ class WatchNullOperatorGuardTest {
      */
     @Test
     void registerDoesNotThrowWhenPrimaryOperatorIsMissing() {
-        assertDoesNotThrow(() ->
-                SyslenzAgent.watch("queue_size").onFire(e -> {}).register());
+        String warning = captureStderr(() -> assertDoesNotThrow(() ->
+                SyslenzAgent.watch("queue_size").onFire(e -> {}).register()));
+
+        assertEquals("[syslenz] watch \"queue_size\" has no operator configured; "
+                + "it will never fire" + System.lineSeparator(), warning);
     }
 
     /**
@@ -91,11 +98,15 @@ class WatchNullOperatorGuardTest {
      */
     @Test
     void registerDoesNotThrowWhenSecondaryOperatorIsMissing() {
-        assertDoesNotThrow(() -> {
+        String warning = captureStderr(() -> assertDoesNotThrow(() -> {
             WatchCondition c = SyslenzAgent.watch("queue_size").greaterThan(1.0);
             c.and("error_rate");   // 演算子を選ばない
             c.onFire(e -> {}).register();
-        });
+        }));
+
+        assertEquals("[syslenz] watch \"queue_size\" has no operator configured for its "
+                + "secondary metric \"error_rate\"; it will never fire"
+                + System.lineSeparator(), warning);
     }
 
     // ── 境界系: evaluate() 時点 ───────────────────────────────────────────
@@ -226,7 +237,7 @@ class WatchNullOperatorGuardTest {
         SyslenzAgent.registry().gauge("queue_size", () -> 20_000.0);
         SyslenzAgent.watch("app_queue_size").register();   // 演算子未設定
 
-        int port = 19271;
+        int port = findFreePort();
         SyslenzAgent.startServer(port, "127.0.0.1");
         Thread.sleep(200);
 
@@ -247,5 +258,23 @@ class WatchNullOperatorGuardTest {
             writer.println(command);
             return reader.readLine();
         }
+    }
+
+    private static int findFreePort() throws IOException {
+        try (ServerSocket socket = new ServerSocket(0)) {
+            return socket.getLocalPort();
+        }
+    }
+
+    private static String captureStderr(Runnable action) {
+        PrintStream original = System.err;
+        ByteArrayOutputStream captured = new ByteArrayOutputStream();
+        try (PrintStream replacement = new PrintStream(captured, true, StandardCharsets.UTF_8)) {
+            System.setErr(replacement);
+            action.run();
+        } finally {
+            System.setErr(original);
+        }
+        return captured.toString(StandardCharsets.UTF_8);
     }
 }
