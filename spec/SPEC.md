@@ -471,6 +471,7 @@ v1.1.1 時点では `UNKNOWN` 状態は存在しない。`WatchEntry` の初期�
 `WatchCondition.evaluate(double value)` の実装:
 
 ```java
+if (operator == null) return false;   // 演算子未設定の条件は発火しない (fail-safe)
 return switch (operator) {
     case GREATER_THAN          -> value > threshold;
     case LESS_THAN             -> value < threshold;
@@ -490,6 +491,7 @@ return switch (operator) {
 `CompoundCondition.evaluate(double value)` の実装:
 
 ```java
+if (operator == null) return false;   // 演算子未設定のセカンダリ条件は満たされない (fail-safe)
 return switch (operator) {
     case GREATER_THAN          -> value > threshold;
     case LESS_THAN             -> value < threshold;
@@ -500,6 +502,17 @@ return switch (operator) {
 ```
 
 セカンダリ条件のビルダーは上記 4 演算子しか公開していないため `default` 分岐は到達しないが、誤発火を避けるため `false` (fail-safe) を返す。
+
+`operator` は `and(metric)` でセカンダリメトリクスだけを指定して演算子メソッドを呼ばなかった場合に `null` になる。この場合もセカンダリ条件は満たされないものとして扱い、`switch (null)` の `NullPointerException` を防ぐ (issue #22)。
+
+#### 5.1.3 評価の隔離 (Evaluation Isolation)
+
+`WatchRegistry.evaluate(Map)` は条件を1件ずつ `evaluateEntry()` で評価し、そこから送出された例外を捕捉して当該条件だけをスキップする。1件の条件の失敗が以下を引き起こさないことを保証する。
+
+- 後続の条件が評価されないこと（`entries` は登録順に走査されるため）
+- `SyslenzServer.collectSnapshot()` が失敗して `SNAPSHOT` が空応答になること
+
+スキップは同一条件につき初回のみ `stderr` に報告する（毎回のスナップショットで出力が膨らむのを避けるため）。コールバック (`onFire` / `onResolve`) の例外は従来どおり個別に捕捉される。
 
 ### 5.2 クールダウン (Cooldown)
 
@@ -633,6 +646,7 @@ public final class SyslenzAgent {
 
 - 新しい `WatchCondition` ビルダーを返す
 - `register()` を呼ぶまでは `WatchRegistry` に登録されない
+- 演算子を選ばないまま `register()` しても例外は投げない。`stderr` に警告を出したうえで登録し、その条件は発火しない（監視の設定ミスで被監視アプリを止めないため）
 
 #### `clearWatches()`
 
@@ -921,6 +935,7 @@ JUnit 5 (Jupiter) のみ使用。外部モックライブラリ (Mockito 等) �
 | `WatchConditionOperatorsTest` | 各 Operator の閾値評価・WatchEvent 形式・クールダウン | v1.1.1 |
 | `MetricRegistryTest` | カスタムメトリクス登録・収集・`app_` プレフィックス・例外処理 | v1.1.1 |
 | `JsonExporterTest` | JSON 出力フォーマット・NaN/Infinity 除去・制御文字サニタイズ | v1.1.1 |
+| `WatchNullOperatorGuardTest` | 演算子未設定条件の fail-safe 評価・評価の隔離・SNAPSHOT 応答維持 (issue #22) | Unreleased |
 
 ### 11.3 テストケース詳細
 
@@ -949,6 +964,23 @@ JUnit 5 (Jupiter) のみ使用。外部モックライブラリ (Mockito 等) �
 | `compoundLessThanOrEqualFiresAtSecondaryBoundary` | セカンダリ `<=` が閾値ちょうどで発火すること |
 | `compoundLessThanOrEqualDoesNotFireAboveSecondaryThreshold` | セカンダリ `<=` が閾値超過で発火しないこと |
 | `compoundConditionDoesNotFireWhenSecondaryMetricIsAbsentFromMap` | セカンダリメトリクスのキー自体が値マップにない場合は発火しないこと |
+
+#### WatchNullOperatorGuardTest
+
+**目的:** 演算子が選ばれないまま登録された条件が `NullPointerException` を投げず、他の条件やスナップショット全体を巻き添えにしないこと (issue #22) を保護する。
+
+| テスト名 | 検証内容 |
+|---------|---------|
+| `fullyConfiguredWatchStillFires` | 演算子を選んだ通常のチェーンが従来どおり発火すること（回帰防止） |
+| `chainApiStillReturnsTheSameParentInstance` | セカンダリ条件の 4 演算子メソッドが同一の親 `WatchCondition` を返すこと |
+| `registerDoesNotThrowWhenPrimaryOperatorIsMissing` | 演算子未設定でも `register()` が例外を投げないこと |
+| `registerDoesNotThrowWhenSecondaryOperatorIsMissing` | セカンダリ演算子未設定でも `register()` が例外を投げないこと |
+| `watchWithoutPrimaryOperatorNeitherThrowsNorFires` | 演算子未設定の条件が評価時に NPE を投げず、発火もしないこと |
+| `compoundWithoutSecondaryOperatorNeitherThrowsNorFires` | セカンダリ演算子未設定の複合条件が NPE を投げず、プライマリ単独でも発火しないこと |
+| `unconfiguredWatchNeverAppearsInActiveAlerts` | 未完成の条件が `alerts` に現れないこと |
+| `unconfiguredWatchDoesNotStarveLaterWatches` | 壊れた条件を先に登録しても後続の健全な条件が評価されること |
+| `anyEvaluationExceptionIsContainedToItsOwnEntry` | 評価中の任意の例外が当該条件だけに封じ込められること |
+| `snapshotStillRespondsWhenAnUnconfiguredWatchIsRegistered` | 未完成の条件があっても `SNAPSHOT` が正常な応答を返すこと |
 
 #### LocalhostBindingTest
 
@@ -1636,6 +1668,10 @@ SyslenzAgent.watch("queue_depth").greaterThan(1000).register();      // これ�
 `startServer()` はデーモンスレッドを起動して即座に返る。ポートが開くまでに数ミリ秒かかる場合がある。テストで即座に接続する場合は `Thread.sleep(100)` 等の待機を挟む。
 
 ポートが既に使用中の場合、サーバーは `System.err` にエラーを出力して停止する。例外はスローされない。
+
+#### Watch が一切発火しない / `stderr` に `has no operator configured` が出る
+
+演算子メソッド（`greaterThan` 等）を呼ばないまま `register()` している。`.and(metric)` でセカンダリメトリクスだけを指定して演算子を選ばなかった場合も同じ。条件は登録されるが発火しないため、警告の指す metric に演算子を追加する。
 
 #### 複合条件が期待通りに動作しない
 

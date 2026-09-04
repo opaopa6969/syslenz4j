@@ -184,6 +184,14 @@ SyslenzAgent.watch("app_queue_size")
 
 条件を `WatchRegistry` にコミットします。この呼び出し後、`WatchCondition` オブジェクトを再利用・変更してはいけません。
 
+条件が未完成でも `register()` は例外を投げません。演算子メソッドを一度も呼んでいない場合や、`.and(metric)` でセカンダリメトリクスを指定したまま演算子を選ばなかった場合でも、条件は登録され、`stderr` に警告を出したうえでその Watch は**発火しません**:
+
+```
+[syslenz] watch "app_queue_size" has no operator configured; it will never fire
+```
+
+これは意図的な設計です。監視の設定ミスで被監視アプリを止めないためで、未完成の条件は不活性（発火せず、`alerts` にも現れず、他の Watch の評価にも影響しない）として扱われます。
+
 ---
 
 ## WatchEvent リファレンス
