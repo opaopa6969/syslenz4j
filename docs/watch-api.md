@@ -178,8 +178,6 @@ SyslenzAgent.watch("app_queue_size")
 
 The secondary operator methods (`greaterThan`, `lessThan`, `greaterThanOrEqual`, `lessThanOrEqual`) all return the parent `WatchCondition`, so you can keep chaining `.severity()`, `.onFire()`, `.register()`, etc. after `.and("x").greaterThan(v)`.
 
-> **Current limitation (v1.1.1)**: only `greaterThan` and `lessThan` are evaluated for the secondary condition. The `greaterThanOrEqual` / `lessThanOrEqual` overloads compile and chain correctly but are treated as always-true at evaluation time (the watch then fires based on the primary condition alone). See [GitHub #3](https://github.com/opaopa6969/syslenz4j/issues/3).
-
 ---
 
 ### `.register()`

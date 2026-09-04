@@ -220,7 +220,9 @@ public class WatchCondition {
             return switch (operator) {
                 case GREATER_THAN -> value > threshold;
                 case LESS_THAN -> value < threshold;
-                default -> true;
+                case GREATER_THAN_OR_EQUAL -> value >= threshold;
+                case LESS_THAN_OR_EQUAL -> value <= threshold;
+                default -> false;
             };
         }
     }
