@@ -7,7 +7,7 @@ on:
 
 jobs:
   build-and-publish:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, syslenz4j-ci]
     permissions:
       contents: read
 
